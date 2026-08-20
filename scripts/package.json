@@ -1,0 +1,10 @@
+{
+  "name": "localescore-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One-time/periodic ETL scripts -- see README.md. Kept as a separate package from backend/ since these never run in the request path.",
+  "dependencies": {
+    "pg": "^8.12.0"
+  }
+}

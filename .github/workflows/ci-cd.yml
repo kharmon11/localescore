@@ -1,0 +1,103 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+        env:
+          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN }}
+
+  deploy:
+    needs: [test-backend, build-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          docker build --platform linux/amd64 \
+            -f backend/Dockerfile \
+            --build-arg VITE_MAPBOX_TOKEN="${{ secrets.VITE_MAPBOX_TOKEN }}" \
+            --build-arg VITE_API_BASE_URL="" \
+            -t ${{ vars.ARTIFACT_REGISTRY_PATH }}:${{ github.sha }} \
+            .
+
+      - name: Push image
+        run: docker push ${{ vars.ARTIFACT_REGISTRY_PATH }}:${{ github.sha }}
+
+      - name: Deploy candidate revision (no traffic)
+        run: |
+          gcloud run deploy localescore \
+            --image=${{ vars.ARTIFACT_REGISTRY_PATH }}:${{ github.sha }} \
+            --region=us-central1 \
+            --service-account=${{ vars.RUNTIME_SA_EMAIL }} \
+            --set-secrets=DATABASE_URL=localescore-database-url:latest,ORS_API_KEY=localescore-ors-api-key:latest \
+            --allow-unauthenticated \
+            --min-instances=0 \
+            --no-traffic \
+            --tag=candidate \
+            --project=${{ vars.GCP_PROJECT_ID }}
+
+      - name: Smoke test candidate revision
+        run: |
+          CANDIDATE_URL=$(gcloud run services describe localescore \
+            --region=us-central1 \
+            --project=${{ vars.GCP_PROJECT_ID }} \
+            --format="value(status.traffic[?tag=='candidate'].url)")
+          echo "Candidate URL: $CANDIDATE_URL"
+          curl -sf "$CANDIDATE_URL/health"
+          curl -sf -X POST "$CANDIDATE_URL/score" \
+            -H "Content-Type: application/json" \
+            -d '{"lat": 41.2565, "lng": -95.9345, "subtype": "fast_casual"}'
+
+      - name: Promote to 100% traffic
+        run: |
+          gcloud run services update-traffic localescore \
+            --region=us-central1 \
+            --to-latest \
+            --project=${{ vars.GCP_PROJECT_ID }}

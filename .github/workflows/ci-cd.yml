@@ -88,7 +88,7 @@ jobs:
           CANDIDATE_URL=$(gcloud run services describe localescore \
             --region=us-central1 \
             --project=${{ vars.GCP_PROJECT_ID }} \
-            --format="value(status.traffic[?tag=='candidate'].url)")
+            --format=json | jq -r '.status.traffic[] | select(.tag=="candidate") | .url')
           echo "Candidate URL: $CANDIDATE_URL"
           curl -sf "$CANDIDATE_URL/health"
           curl -sf -X POST "$CANDIDATE_URL/score" \

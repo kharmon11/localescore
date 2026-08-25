@@ -12,6 +12,7 @@
 // year-over-year rate, not a true 1-year change. That's a real limitation
 // worth stating in the demo UI, not just in this comment.
 
+import "dotenv/config";
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import pg from "pg";

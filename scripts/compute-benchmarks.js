@@ -54,6 +54,7 @@
 // daily runs the first time. After that, every future run costs 0 new
 // calls unless the sample grid or a subtype's travel profile changes.
 
+import "dotenv/config";
 import { pool, query } from "../backend/src/db.js";
 import { getIsochrone, buildCacheKey } from "../backend/src/services/isochrone.js";
 import { computeRawMetrics } from "../backend/src/services/spatialQueries.js";

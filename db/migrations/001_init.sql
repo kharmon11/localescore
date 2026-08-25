@@ -1,7 +1,8 @@
 -- 001_init.sql
 -- Initial schema for the Omaha (Douglas + Sarpy county) restaurant site-score project.
--- Run against a Neon Postgres database. Requires the postgis extension, which Neon supports
--- but does not enable by default on a fresh project.
+-- Run against any Postgres database that allows installing the postgis
+-- extension (this project was built against Neon's free tier, but nothing
+-- here is Neon-specific).
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 

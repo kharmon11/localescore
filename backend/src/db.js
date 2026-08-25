@@ -6,7 +6,7 @@ if (!process.env.DATABASE_URL) {
   // Fail loudly and immediately rather than letting every query fail later
   // with a confusing connection error.
   throw new Error(
-    "DATABASE_URL is not set. Copy backend/.env.example to backend/.env and fill in your Neon connection string."
+    "DATABASE_URL is not set. Copy backend/.env.example to backend/.env and fill in your Postgres connection string."
   );
 }
 

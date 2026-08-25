@@ -1,6 +1,6 @@
 # Restaurant Site Score: Methodology & Architecture
 
-A design spec for a portfolio project that scores a candidate location for a restaurant/food concept, using free and low-cost data sources.
+A design spec for a proof-of-concept that scores a candidate location for a restaurant/food concept, using free and low-cost data sources.
 
 **Geographic scope:** Omaha, NE metro — specifically Douglas and Sarpy counties, Nebraska (Omaha proper plus Bellevue, Papillion, La Vista, and surrounding suburbs). This is a deliberate subset of the full 8-county OMB-defined Omaha–Council Bluffs metro area, chosen to keep data ingestion manageable; Pottawattamie County, IA (Council Bluffs) could be added later using the same pipeline if a cross-river example becomes useful.
 
@@ -92,38 +92,40 @@ Translate the overall 0–100 score into a plain-language verdict, matching the 
 - 40–59: Marginal — depends on rent and concept fit
 - 0–39: Weak site
 
-Always show the sub-score breakdown alongside the overall number (e.g. as a radar/spider chart) — the single number is the least useful part of the output; *why* it landed there is what makes the tool feel credible.
+Always show the sub-score breakdown alongside the overall number (a horizontal bar chart, one bar per sub-score) — the single number is the least useful part of the output; *why* it landed there is what makes the tool feel credible.
 
 ---
 
 ## 3. Architecture
 
-### 3.1 Design principle for a portfolio project
+### 3.1 Design principle for a proof-of-concept
 
-Do not hit live external APIs on every user query — that's slow, costly, and makes rate limits your bottleneck during a demo. Instead, **pre-ingest data for one metro area** (pick your city) into your own database, and serve queries entirely from that local store. Isochrones are the one thing computed live, since they depend on the exact clicked point — everything else (POIs, demographics) is pre-loaded and queried spatially.
+Hitting live external APIs on every user query would be slow, costly, and make rate limits the bottleneck during a demo. Instead, I pre-ingest data for one metro area (Omaha, NE) into my own database, and serve queries entirely from that local store. Isochrones are the one thing computed live, since they depend on the exact clicked point — everything else (POIs, demographics) is pre-loaded and queried spatially.
 
 ### 3.2 Components
 
-**Frontend** — Map UI built on Mapbox GL JS, where the user clicks a point or searches an address (free geocoding via Census Geocoder or Nominatim). Sends `{lat, lng, subtype}` to the backend and renders the returned score, sub-score breakdown, and isochrone/POI overlay. Mapbox GL JS's free tier covers 50,000 map loads/month, plenty for a portfolio demo; it requires a Mapbox access token (free account signup) and its source/layer styling model is what makes the isochrone fill (colored by value) and category-styled POI markers straightforward to build — see §3.6 for specifics.
+**Frontend** — Map UI built on Mapbox GL JS, where the user clicks a point on the map. Sends `{lat, lng, subtype}` to the backend and renders the returned score, sub-score breakdown, and isochrone overlay. Mapbox GL JS's free tier covers 50,000 map loads/month, plenty for this project; it requires a Mapbox access token (free account signup) and its source/layer styling model is what makes the isochrone fill (colored by value) and category-styled POI markers straightforward to build — see §3.6 for specifics.
 
-**Backend API — Node.js + Express** — Single endpoint, e.g. `POST /score`, that:
+**Backend API — Node.js + Express** — A single endpoint, `POST /score`, that:
 1. Calls OpenRouteService for the isochrone polygon(s) matching the subtype's travel profile.
 2. Runs spatial queries against the Neon/PostGIS database using that polygon: population-weighted demographic sum, POI counts by category, complementary-business counts.
 3. Loads the active `scoring_profiles` row for the subtype (or merges in a request-supplied override) and passes it plus the query results into the scoring engine — a pure, dependency-free module so the scoring math is unit-testable without mocking any API or database.
 4. Returns the overall score, sub-scores, and supporting geometry to the frontend.
 
-Library choices: use `pg` (node-postgres) directly with parameterized SQL for anything spatial — the PostGIS functions you need (`ST_Intersects`, `ST_DWithin`, `ST_Area`, `ST_GeomFromGeoJSON`) are just SQL, and an ORM's geometry support tends to get in the way rather than help. `Knex` is fine for the plain relational tables (`scoring_profiles`, cached isochrones) if a query builder is wanted there. For any GeoJSON manipulation on the Node side (e.g. shaping the OpenRouteService isochrone response before handing it to Postgres), `@turf/turf` is the JS equivalent of Shapely/GeoPandas.
+Library choices: I use `pg` (node-postgres) directly with parameterized SQL for anything spatial — the PostGIS functions needed (`ST_Intersects`, `ST_DWithin`, `ST_Area`, `ST_GeomFromGeoJSON`) are just SQL, and an ORM's geometry support tends to get in the way rather than help. A query builder or GeoJSON library (Knex, `@turf/turf`) turned out not to be necessary — the OpenRouteService isochrone response gets passed straight to Postgres as a JSON string via `ST_GeomFromGeoJSON`, with no client-side reshaping needed.
 
 **Database — PostgreSQL on Neon, with PostGIS** — Neon's free tier (0.5GB storage per project, 100 CU-hours/month, scale-to-zero when idle) comfortably covers a two-county dataset; Douglas + Sarpy together are a few hundred Census block groups and well under 100,000 Overture POIs, realistically tens of megabytes. PostGIS is a supported extension on Neon (confirmed directly against their docs), along with the TIGER geocoder extension, which is handy since the demographic layer is TIGER/ACS data. Tables, each with a spatial index (`GIST`) on their geometry column:
-- Census block group polygons (Douglas + Sarpy only) joined to ACS demographic attributes (population, income, age) and LEHD LODES workforce counts.
+- Census block group polygons (Douglas + Sarpy only) joined to ACS demographic attributes (population, income, age).
 - Overture Places POIs for the same two counties, with category tags.
-- (Optional) OSM road/transit data for the accessibility heuristic.
+- Overture Transportation road segments (Douglas + Sarpy only), tagged with a road class, for the accessibility heuristic.
 - `scoring_profiles` — one row per restaurant subtype: `subtype`, `weights` (jsonb), `normalization_params` (jsonb), `version`, `created_at`. This is what makes the score calculation tunable without a deploy — edit a row (or insert a new version) and the next request picks it up.
 - `isochrone_cache` — keyed by rounded `(lat, lng, travel_profile)`, storing the returned polygon and a timestamp, to avoid re-hitting OpenRouteService for repeated or nearby demo clicks.
 
-**ETL / ingestion scripts** (run once for Douglas + Sarpy counties, not per request) — Download Overture data via the `overturemaps` CLI filtered to the two counties' combined bounding box, pull ACS + TIGER block group data via the Census API, and load both into Neon. Since Neon speaks the standard Postgres wire protocol, `ogr2ogr -f "PostgreSQL" "PG:<neon-connection-string>"` can target it directly — no separate export/import step needed. Re-run periodically (Overture ships monthly; ACS updates annually) rather than live. These scripts can be plain Node scripts too, to keep the whole project in one language, though a quick Python/GeoPandas one-off for ingestion is also reasonable since it never runs in the request path.
+**ETL / ingestion scripts** (run once for Douglas + Sarpy counties, not per request) — Download Overture data via the `overturemaps` CLI filtered to the two counties' combined bounding box, pull ACS + TIGER block group data via the Census API, and load all of it into Neon: `ingest-overture.sh` (places), `ingest-roads.sh` (road segments), and `ingest-census.js` (demographics + geometry). Since Neon speaks the standard Postgres wire protocol, `ogr2ogr -f "PostgreSQL" "PG:<neon-connection-string>"` can target it directly — no separate export/import step needed. Re-run periodically (Overture ships monthly; ACS updates annually) rather than live. I wrote these as plain Node/bash scripts to keep the whole project in one language, rather than reaching for Python/GeoPandas.
 
-**Isochrone caching** — Cache isochrone responses keyed by `(rounded lat/lng, travel profile)` since nearby points and repeated demo clicks will often reuse the same or a very similar polygon. This keeps you comfortably inside the isochrones free tier under repeated demo use. (Note, added 2026-08-19: the free tier turned out to be smaller than this doc originally assumed — 500 requests/day plus a 20-requests/minute rate limit as of a real account check that date, not a flat 2,500/day — and the provider migrated its API domain from `api.openrouteservice.org` to `api.heigit.org` around the same time, `api.openrouteservice.org` shutting off entirely 2026-08-24. See `backend/src/services/isochrone.js` and `scripts/compute-benchmarks.js` for the current numbers and endpoint.)
+**Isochrone caching** — Cache isochrone responses keyed by `(rounded lat/lng, travel profile)` since nearby points and repeated demo clicks will often reuse the same or a very similar polygon. This keeps usage comfortably inside the isochrones free tier under repeated use. (Note, added 2026-08-19: the free tier turned out to be smaller than this doc originally assumed — 500 requests/day plus a 20-requests/minute rate limit as of a real account check that date, not a flat 2,500/day — and the provider migrated its API domain from `api.openrouteservice.org` to `api.heigit.org` around the same time, `api.openrouteservice.org` shutting off entirely 2026-08-24. See `backend/src/services/isochrone.js` and `scripts/compute-benchmarks.js` for the current numbers and endpoint.)
+
+The same `isochrone_cache` table also backs `scripts/compute-benchmarks.js`, which samples a grid of points across Douglas + Sarpy per subtype to build the citywide percentile distributions that Demand Density, Complementary Draw, and Growth Trend normalize against (§2.3). Once a grid point's isochrone is cached, every future benchmark run reuses it for free — so this only costs real API calls the first time a subtype's travel profile is populated.
 
 ### 3.3 Request flow
 
@@ -134,17 +136,17 @@ User clicks map point (within Douglas/Sarpy counties)
    → Backend: spatial query (raw SQL via `pg`) against Neon/PostGIS for demographics, competitors, complementary POIs within isochrone
    → Backend: load scoring_profiles row for subtype (merge request-supplied weight overrides, if any)
    → Scoring engine: compute 5 sub-scores + weighted overall score
-   → Backend returns {overall_score, band, sub_scores, isochrone_geojson, poi_geojson}
-   → Frontend renders score card, radar chart, and map overlay
+   → Backend returns {overall, subscores, band, isochrone, notes}
+   → Frontend renders score card, sub-score bar chart, and isochrone map overlay
 ```
 
 ### 3.4 Confirmed stack
 
-- **Frontend:** Vite + React, with Mapbox GL JS (`react-map-gl` is a solid React wrapper) for the map and a radar chart for the sub-score breakdown.
-- **Backend:** Node.js + Express; `pg` for spatial SQL, `Knex` optionally for relational tables, `@turf/turf` for any server-side GeoJSON work.
+- **Frontend:** Vite + React, with Mapbox GL JS (`react-map-gl` is a solid React wrapper) for the map and a bar chart for the sub-score breakdown.
+- **Backend:** Node.js + Express; `pg` for spatial SQL, with parameterized SQL for anything PostGIS-related.
 - **Database:** PostgreSQL on Neon (free tier), with the PostGIS extension.
-- **Data sources:** Overture Places (POIs), US Census ACS + TIGER + LEHD LODES (demographics/workforce/geometry), OpenRouteService (isochrones), OpenStreetMap (roads/transit, via Overture's Transportation theme or raw OSM extracts).
-- **Hosting:** Neon free tier for the database; frontend/backend can sit on any free-tier host suitable for a portfolio demo (e.g. Vercel/Render/Fly.io) — not settled yet, worth deciding when we scaffold deployment.
+- **Data sources:** Overture Places (POIs), US Census ACS + TIGER (demographics/geometry), OpenRouteService (isochrones), OpenStreetMap (roads/transit, via Overture's Transportation theme).
+- **Hosting:** Docker on Cloud Run, deployed via GitHub Actions — build the image, deploy it as a no-traffic candidate revision, smoke-test that revision, then promote it to 100% traffic.
 
 ### 3.5 MVP scope
 
@@ -156,6 +158,5 @@ Chosen over MapLibre/Leaflet for its data-driven styling and Studio tooling, at 
 
 - **Account & token:** free Mapbox account, generate a public access token, keep it in a frontend env variable (`VITE_MAPBOX_TOKEN`) — it's meant to be public but should still be URL-restricted in the Mapbox dashboard to this project's domain once deployed.
 - **React integration:** use `react-map-gl` (Vis.gl's maintained wrapper) rather than wiring the imperative Mapbox GL JS API directly into React — it manages the map instance lifecycle for you and fits React's component model.
-- **Isochrone rendering:** add the isochrone GeoJSON returned by the backend as a `Source`, then a `fill` `Layer` with `fill-color` and `fill-opacity` set via a data-driven expression (e.g. shading the primary vs. secondary trade area from §2.2 differently).
-- **POI rendering:** add the POI GeoJSON as a `Source`, then a `symbol` or `circle` `Layer`, using a `match`/`case` expression on category to vary marker color, and clustering (`cluster: true` on the source) if a query returns enough POIs that individual markers get crowded.
+- **Isochrone rendering:** add the isochrone GeoJSON returned by the backend as a `Source`, then a `fill` `Layer` with a single `fill-color` and a data-driven `fill-opacity` expression keyed on the ORS range's `value` (seconds) — closer areas render more opaque, farther areas lighter, distinguishing the primary vs. secondary trade area from §2.2 without needing separate layers.
 - **Free tier tracking:** 50,000 map loads/month; a map "load" is counted per `Map` instantiation, so watch for accidental re-mounts in React (e.g. a key change forcing a full remount) inflating the count during development — this is the most common way to burn through a Mapbox free tier by accident.

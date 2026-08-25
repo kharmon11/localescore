@@ -7,8 +7,8 @@
 -- secondary/.../residential/service/footway/...) since Overture's
 -- Transportation theme is itself derived from OpenStreetMap.
 --
--- Run against a Neon Postgres database that already has 001_init.sql
--- applied (needs the postgis extension it creates).
+-- Run against a Postgres database that already has 001_init.sql applied
+-- (needs the postgis extension it creates).
 
 CREATE TABLE road_segments (
   overture_id  TEXT PRIMARY KEY,

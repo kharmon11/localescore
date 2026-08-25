@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Downloads Overture Transportation road segments for the Douglas+Sarpy
-# bounding box and loads them into the Neon `road_segments` table -- the
-# data behind the Accessibility & Visibility sub-score's road-classification
-# component (docs/design.md 2.3; see README.md's former "Known gaps" note,
-# now resolved by this + backend/src/services/accessibility.js).
+# bounding box and loads them into the `road_segments` table of your
+# Postgres database -- the data behind the Accessibility & Visibility
+# sub-score's road-classification component (docs/design.md 2.3; see
+# README.md's former "Known gaps" note, now resolved by this +
+# backend/src/services/accessibility.js).
 set -euo pipefail
 
 if [ -z "${DATABASE_URL:-}" ]; then
@@ -22,7 +23,7 @@ echo "Downloading Overture Transportation segments for bbox $BBOX ..."
 # only 'road' rows are kept in the reshape step below.
 overturemaps download --bbox="$BBOX" -f geojson --type=segment -o "$OUT_FILE"
 
-echo "Loading into Neon (road_segments table) ..."
+echo "Loading into Postgres (road_segments table) ..."
 ogr2ogr \
   -f "PostgreSQL" "PG:${DATABASE_URL}" \
   "$OUT_FILE" \

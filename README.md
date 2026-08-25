@@ -1,14 +1,34 @@
-# Omaha Restaurant Site Score
+# LocaleScore
 
-A portfolio project that scores a candidate location for a restaurant concept
-in the Omaha, NE metro (Douglas + Sarpy counties), using free/low-cost data
-sources. Full methodology and architecture rationale: [`docs/design.md`](docs/design.md).
+**[localescore.kenharmon.net →](https://localescore.kenharmon.net)**
+
+A site-selection tool for restaurants. Click a point on the map and get back a score (0-100) rating the potential that location has for a given restaurant concept (coffee shop, fast-casual, and sit-down). This rating is broken down into five weighted sub-scores (demand density, competitive saturation, complementary foot traffic, accessibility, and population growth trend).
+
+This tool is a proof-of-concept, rather than a genuine product, built with free data sources:
+
+* Census American Community Survey (ACS)/TIGER
+* Overture Places
+* OpenStreetMap tags
+* OpenRouteService Isochrones
+
+It is limited to the Omaha, NE metro. I am not an expert in this subject, so the scoring methodology is a reasonable-sounding heuristic rather than professionally validated model. Treat the output as illustrative rather than business guidance.
+
+## How it works
+
+Clicking the map generates a trade area for that point, which then draws an isochrone on the map representing approximate travel times for the restaurant concept (5-10 minute walk for a coffee shop, 5-10 minute drive for fast-casual, 10-20 minute drive for a sit-down restaurant).
+
+Five sub-scores are then computed against that trade area: demand density, competitive saturation, complementary foot traffic, accessibility, and population growth trend. These sub-scores are normalized to 0-100 against a citywide benchmark distribution. A weighted sum of the five produces the final score. The weights and normalization benchmarks live in a Postgres table.
 
 ## Stack
 
-Vite + React (Mapbox GL JS) frontend · Node.js + Express backend · PostgreSQL
-on Neon with PostGIS · OpenRouteService for isochrones · Overture Places +
-US Census ACS/TIGER for the underlying data.
+| Layer | Choice |
+|---|---|
+| Frontend | Vite + React, Mapbox GL JS |
+| Backend | Node.js + Express |
+| Database | PostgreSQL on Neon, with PostGIS |
+| Isochrones | OpenRouteService |
+| Spatial data | Overture Places, US Census ACS/TIGER, OpenStreetMap |
+| Deploy | Docker on Cloud Run, via GitHub Actions (build → deploy a tagged revision → smoke test → promote traffic) |
 
 ## Project layout
 
@@ -20,14 +40,14 @@ scripts/    One-time/periodic ETL: Census + Overture -> Neon
 docs/       Design doc (methodology + architecture)
 ```
 
-## Setup
+## Running it locally
 
 ### 1. Accounts / keys you'll need
 
-- A [Neon](https://neon.tech) project (free tier) with a Postgres connection string.
-- A free [Mapbox](https://account.mapbox.com/access-tokens/) access token.
-- A free [OpenRouteService](https://openrouteservice.org/dev/#/signup) API key.
-- Optionally a [Census API key](https://api.census.gov/data/key_signup.html) (raises the ETL script's rate limit; not required to run it).
+- A Postgres database with the PostGIS extension available — [Neon](https://neon.tech) has a free tier that works well and is what this project was built against, but any Postgres host that allows installing PostGIS works.
+- A [Mapbox](https://account.mapbox.com/access-tokens/) access token.
+- An [OpenRouteService](https://openrouteservice.org/dev/#/signup) API key.
+- A [Census API key](https://api.census.gov/data/key_signup.html)
 
 ### 2. Database
 
@@ -36,23 +56,24 @@ psql "$DATABASE_URL" -f db/migrations/001_init.sql
 psql "$DATABASE_URL" -f db/seed/001_scoring_profiles.sql
 ```
 
-(`CREATE EXTENSION IF NOT EXISTS postgis;` is included in the migration --
-Neon supports PostGIS but doesn't enable it by default on a fresh project.)
+(`CREATE EXTENSION IF NOT EXISTS postgis;` is included in the migration —
+most managed Postgres providers, including Neon, support PostGIS but don't
+enable it by default.)
 
 ### 3. Data ingestion
 
 ```bash
 cd scripts
 npm install
-export DATABASE_URL=...   # same connection string as above
+export DATABASE_URL=...   # your Postgres connection string
 node ingest-census.js
 ./ingest-overture.sh
+./ingest-roads.sh
 node compute-benchmarks.js
 ```
 
-See [`scripts/README.md`](scripts/README.md) for details, prerequisites
-(GDAL/`ogr2ogr`, the `overturemaps` CLI), and caveats worth reading before a
-real run (approximate bounding box, ACS block-group vintage limitations).
+See [`scripts/README.md`](scripts/README.md) for prerequisites (GDAL/`ogr2ogr`,
+the `overturemaps` CLI) and caveats worth reading before a real run.
 
 ### 4. Backend
 
@@ -72,69 +93,29 @@ cp .env.example .env   # fill in VITE_MAPBOX_TOKEN
 npm run dev
 ```
 
-Visit the printed Vite URL (typically http://localhost:5173), click a point
-within Douglas or Sarpy county, and a score should come back for the
-currently-selected restaurant concept.
+## Tuning the App
 
-## Where the tunable pieces live
+- **Scoring weights & normalization benchmarks** live in the
+  `scoring_profiles` table (`db/seed/001_scoring_profiles.sql` seeds the
+  defaults), keyed by restaurant subtype and scoring profile version. Edit a
+  row, or insert a new version, to change how the score is calculated. `POST /score` also accepts an optional `weights` field to try hypothetical weights for a single query without persisting anything.
+- **Scoring math**: `backend/src/scoring/engine.js` calculates the final score.
 
-- **Scoring weights & normalization benchmarks**: `scoring_profiles` table
-  (`db/seed/001_scoring_profiles.sql` seeds the defaults). Edit a row, or
-  insert a new `version`, to change how the score is calculated without
-  touching any code. `POST /score` also accepts an optional `weights` field
-  in the request body to try hypothetical weights for a single query without
-  persisting anything.
-- **Scoring math**: `backend/src/scoring/engine.js` -- a pure function, unit
-  tested in `engine.test.js` (`cd backend && npm test`).
-- **Complementary-business category weights**: currently duplicated between
-  `backend/src/services/spatialQueries.js` and `scripts/compute-benchmarks.js`
-  (flagged in both files) -- worth extracting to a shared module if this
-  project grows past the scaffold stage.
+## Caveats and Limitations
 
-## Known gaps / honest caveats
+This is a proof-of-concept, not a finished product, and a few sub-scores
+lean on proxies rather than ground truth:
 
-This is a scaffold, not a finished product. Specifically:
+- **Accessibility & Visibility** combines Overture Transportation's road
+  classification (primary, motorway, residential, etc.) with rail/bus
+  stations. Normal bus stops, corner lots, and parking are not included.
+- **Growth Trend** compares two five-year surveys rather than year-over-year
+  changes, as that was what was available at the block-group level.
+  `POST /score` returns the actual five-year surveys being compared, and
+  this is also shown in the UI.
+- **Competitive Saturation and Complementary Draw** are built from Overture
+  Places category counts rather than a paid foot-traffic panel. A proxy,
+  but not actual data.
 
-- **Accessibility & Visibility** sub-score (docs/design.md 2.3) is now a real
-  composite of road classification (nearest Overture Transportation segment's
-  `class`, e.g. primary/secondary/residential/service -- see
-  `backend/src/services/accessibility.js`) and transit-stop count within
-  400m -- ingested via `scripts/ingest-roads.sh`. Corner-lot detection and
-  parking availability are still out of scope, per the design doc's own call
-  ("skip if too fiddly" / "manual override field, not an API call"). Transit
-  signal is thin for this metro: Overture has no bus-stop-level data for
-  Douglas/Sarpy, only `train_station`/`bus_station` (11 total across both
-  counties as of the 2026-08-19 ingest), so road classification is doing
-  most of the work in practice.
-- **Growth Trend** compares two ACS 5-year vintages (not a true 1-year
-  change) because the Census Bureau doesn't publish 1-year estimates at the
-  block-group level -- see the note in `scripts/ingest-census.js`. This is a
-  real limit of the underlying data, not something more engineering can fix
-  (the only truly-annual alternative, county-level Population Estimates, is
-  the same number for every point in a county -- too coarse to be useful for
-  comparing nearby sites). Rather than hide it, `POST /score` now returns the
-  *actual* vintages being compared (e.g. "2015–2019 vs. 2020–2024"), read
-  from the ingested data itself via `population_prior_acs_vintage`
-  (`db/migrations/003_prior_acs_vintage_label.sql`), and the UI surfaces this
-  as a caveat next to Growth Trend (hover/focus the ⓘ). For trade areas where
-  that label is missing -- a real gap, not a bug, from the 2010-vs-2020
-  block-group-boundary mismatch already logged by `ingest-census.js` -- the
-  UI falls back to a generic "vintage data unavailable" note rather than
-  silently showing an unlabeled number.
-- **`compute-benchmarks.js`** previously approximated trade areas with a
-  fixed-radius circle instead of a real isochrone, and computed one shared
-  benchmark applied identically to all three subtypes despite their very
-  different trade-area sizes/shapes. As of 2026-08-19 it's rewritten to use
-  real isochrones (via the same `isochrone_cache` the live app uses, so
-  populating it costs OpenRouteService/HeiGIT calls only once, ever, per
-  grid point/subtype) and to build a separate benchmark per subtype.
-  **Confirmed complete**: all three subtypes' `normalization_params` are
-  populated from a full 925-point sample (verified directly against Neon),
-  so this is no longer an open gap.
-- **No deployment/hosting** has been set up yet for either the frontend or
-  backend (Neon's free tier is confirmed and configured; app hosting is
-  not). This project also isn't a git repository yet (`git init` has never
-  been run) -- worth deciding early in any deployment work, since most
-  Google Cloud deploy paths (Cloud Build triggers, Cloud Run source
-  deploys) expect either a connected git repo or an explicit local
-  source/Docker build.
+See [`docs/design.md`](docs/design.md) for the full reasoning behind each of
+these trade-offs.

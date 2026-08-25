@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads Overture Places for the Douglas+Sarpy bounding box and loads them
-# into the Neon `places` table. See scripts/README.md for prerequisites and
-# the bounding box caveat.
+# into the `places` table of your Postgres database. See scripts/README.md
+# for prerequisites and the bounding box caveat.
 set -euo pipefail
 
 if [ -z "${DATABASE_URL:-}" ]; then
@@ -18,7 +18,7 @@ mkdir -p "$OUT_DIR"
 echo "Downloading Overture Places for bbox $BBOX ..."
 overturemaps download --bbox="$BBOX" -f geojson --type=place -o "$OUT_FILE"
 
-echo "Loading into Neon (places table) ..."
+echo "Loading into Postgres (places table) ..."
 # -nln places targets the existing table (see db/migrations/001_init.sql);
 # -append keeps re-runs idempotent-ish (Overture's IDs are stable, so a
 # PRIMARY KEY conflict on overture_id would need an upsert -- see note below).

@@ -86,10 +86,18 @@ async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
 /**
  * Rounds lat/lng to ~11m precision (4 decimal places -- 1 decimal degree of
  * latitude is ~111km, so 10^-4 degree is ~11m; 5 decimal places, used here
- * previously, is actually ~1.1m and was too tight to give nearby demo
- * clicks a realistic chance of sharing a cache entry) so that clicks a few
- * meters apart share a cache entry, then folds in the travel profile so
- * different subtypes at the same point don't collide.
+ * previously, is ~1.1m). This lets two clicks within about 11m of each
+ * other share a cache entry, then folds in the travel profile so different
+ * subtypes at the same point don't collide.
+ *
+ * In practice this gives almost no protection against the live ORS/HeiGIT
+ * quota: ordinary exploratory map clicks are rarely within 11m of each
+ * other, so nearly every click is a cache miss and costs a real API call.
+ * It also does nothing for scripts/compute-benchmarks.js's benchmark grid,
+ * whose sample points are ~1.7-2.2km apart -- confirmed 2026-08-25 while
+ * diagnosing a live quota-exhaustion outage. See
+ * project_click_quota_architecture_flaw.md (Claude's memory for this repo)
+ * for the full writeup; a caching/quota strategy overhaul is planned.
  *
  * Exported so other callers that need to know (not fetch) whether a point is
  * already cached -- e.g. scripts/compute-benchmarks.js checking whether a

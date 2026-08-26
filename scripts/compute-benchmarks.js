@@ -60,7 +60,7 @@ import { getIsochrone, buildCacheKey } from "../backend/src/services/isochrone.j
 import { computeRawMetrics } from "../backend/src/services/spatialQueries.js";
 import { SUBTYPE_COMPETITOR_CATEGORY_PATTERNS } from "../backend/src/routes/score.js";
 
-const GRID_SPACING_DEGREES = 0.02; // ~1.7km at this latitude; adjust for denser/coarser sampling
+const GRID_SPACING_DEGREES = 0.02; // ~1.7km E-W / ~2.2km N-S at this latitude; adjust for denser/coarser sampling
 // Matches the corrected Douglas+Sarpy bbox in ingest-overture.sh / scripts/README.md
 // (verified 2026-08-19 against the real TIGER county boundary) -- sampling
 // with the old, too-tight box here would miss the western edge of the

@@ -4,11 +4,15 @@ import { query } from "../db.js";
 // score higher than residential streets"). Values are Overture Transportation
 // segment `class` values, which follow the same taxonomy as OSM `highway`
 // tags (confirmed against a live Douglas+Sarpy download on 2026-08-19, which
-// turned up all 17 of these). Arterial-equivalent (primary/trunk/motorway)
-// scores highest, collector-equivalent (secondary/tertiary) in the middle,
-// residential/service/pedestrian-only ways lowest. Tune freely -- this
-// mapping is a starting point, not a settled answer (same spirit as
-// spatialQueries.js's COMPLEMENTARY_CATEGORY_WEIGHTS).
+// turned up 17 distinct values). 16 are mapped explicitly below; the 17th,
+// "unknown" (1,742 segments as of a 2026-08-25 check), isn't listed here and
+// falls through to DEFAULT_ROAD_CLASS_SCORE instead -- which happens to also
+// be 50, the same as `unclassified`, so this is a deliberate simplification,
+// not a bug. Arterial-equivalent (primary/trunk/motorway) scores highest,
+// collector-equivalent (secondary/tertiary) in the middle, residential/
+// service/pedestrian-only ways lowest. Tune freely -- this mapping is a
+// starting point, not a settled answer (same spirit as spatialQueries.js's
+// COMPLEMENTARY_CATEGORY_WEIGHTS).
 const ROAD_CLASS_SCORES = {
   primary: 100,
   trunk: 95,

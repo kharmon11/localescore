@@ -67,7 +67,7 @@ node ingest-census.js       # block group geometry + demographics -> census_bloc
 node compute-benchmarks.js  # citywide medians/percentiles -> scoring_profiles.normalization_params
 ```
 
-Re-run `ingest-overture.sh` and `ingest-roads.sh` on whatever cadence you
+Re-run `ingest-overture.sh` and `ingest-roads.sh` on whatever time-scale you
 like (Overture ships monthly). `ingest-census.js` only needs re-running when
 a new ACS vintage is released (annually). Always re-run
 `compute-benchmarks.js` after any of the above, since the benchmarks are
@@ -112,7 +112,9 @@ again the next day -- it resumes exactly where it left off and never writes
 a benchmark built from fewer than all ~925 sample points for a subtype.
 After that first full population, subsequent refreshes (new Overture/Census
 data, or just re-running on a schedule) cost **zero** additional isochrone
-calls -- only re-running it after changing a subtype's isochrone travel
-profile (`scoring_profiles.isochrone_profile`) or the sample grid itself
-(`GRID_SPACING_DEGREES`/`BBOX` in the script) would need fresh isochrones
-again, and then only for what actually changed.
+calls -- only changing a subtype's isochrone travel profile
+(`scoring_profiles.isochrone_profile`) or the sample grid itself
+(`GRID_SPACING_DEGREES`/`BBOX` in the script) needs fresh isochrones again,
+and then only for what actually changed. As of 2026-08-26,
+`compute-benchmarks.js` compares each subtype's last sample against the
+current data and config, and only resamples what's actually stale.

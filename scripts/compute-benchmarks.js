@@ -194,9 +194,14 @@ async function sampleSubtype(profile, competitorCategoryPatterns, points, starti
   let deferred = 0;
   let newOrsCalls = startingOrsCalls;
 
+  // One query for the whole subtype instead of one per grid point -- tells
+  // us up front which points still need a real ORS call, without 925
+  // separate round trips to find out the same thing one at a time.
+  const cachedKeys = await loadCachedKeys(profile.isochroneProfile);
+
   for (const point of points) {
     const cacheKey = buildCacheKey(point.lat, point.lng, profile.isochroneProfile);
-    const alreadyCached = await isIsochroneCached(cacheKey);
+    const alreadyCached = cachedKeys.has(cacheKey);
 
     if (!alreadyCached && newOrsCalls >= MAX_NEW_ORS_CALLS_PER_RUN) {
       deferred += 1;
@@ -232,9 +237,12 @@ async function sampleSubtype(profile, competitorCategoryPatterns, points, starti
   return { samples, deferred, newOrsCalls };
 }
 
-async function isIsochroneCached(cacheKey) {
-  const { rows } = await query(`SELECT 1 FROM isochrone_cache WHERE cache_key = $1`, [cacheKey]);
-  return rows.length > 0;
+async function loadCachedKeys(isochroneProfile) {
+  const { rows } = await query(
+    `SELECT cache_key FROM isochrone_cache WHERE travel_profile = $1 AND ranges_minutes = $2`,
+    [isochroneProfile.mode, isochroneProfile.rangesMinutes]
+  );
+  return new Set(rows.map((row) => row.cache_key));
 }
 
 async function loadActiveProfiles() {

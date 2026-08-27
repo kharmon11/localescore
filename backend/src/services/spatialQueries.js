@@ -112,15 +112,24 @@ const COMPLEMENTARY_RADIUS_METERS = 400;
 export async function computeRawMetrics(lat, lng, isochroneGeoJSON, competitorCategoryPatterns, ringWeights) {
   const { primaryRingGeoJSON, outerRingGeoJSON } = splitRings(isochroneGeoJSON);
 
-  const [demandAndGrowth, competitorsPer1000, complementaryWeightedCount, accessibilityRaw] = await Promise.all([
+  const [demandAndGrowth, complementaryWeightedCount, accessibilityRaw] = await Promise.all([
     computeDemandAndGrowth(primaryRingGeoJSON, outerRingGeoJSON, ringWeights),
-    computeCompetitorsPer1000(outerRingGeoJSON, competitorCategoryPatterns),
     computeComplementaryDraw(lat, lng),
     computeAccessibility(lat, lng),
   ]);
 
+  // Runs after (not alongside) computeDemandAndGrowth because it reuses that
+  // query's trade-area population instead of re-deriving it -- see the note
+  // on computeCompetitorsPer1000 below.
+  const { tradeAreaPopulation, ...demandMetrics } = demandAndGrowth;
+  const competitorsPer1000 = await computeCompetitorsPer1000(
+    outerRingGeoJSON,
+    competitorCategoryPatterns,
+    tradeAreaPopulation
+  );
+
   return {
-    ...demandAndGrowth,
+    ...demandMetrics,
     competitorsPer1000,
     complementaryWeightedCount,
     accessibilityRaw,
@@ -158,9 +167,14 @@ async function computeDemandAndGrowth(primaryGeoJSON, outerGeoJSON, { primaryRin
     WITH primary_ring AS (
       SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) AS geom
     ),
+    outer_ring AS (
+      -- Parsed once and reused below (both by secondary_ring and the bbox
+      -- filter) instead of calling ST_GeomFromGeoJSON($2) twice per query.
+      SELECT ST_SetSRID(ST_GeomFromGeoJSON($2), 4326) AS geom
+    ),
     secondary_ring AS (
       SELECT ST_Difference(
-        ST_SetSRID(ST_GeomFromGeoJSON($2), 4326),
+        (SELECT geom FROM outer_ring),
         (SELECT geom FROM primary_ring)
       ) AS geom
     )
@@ -184,8 +198,8 @@ async function computeDemandAndGrowth(primaryGeoJSON, outerGeoJSON, { primaryRin
       -- row from a single ingest run shares the same vintage in practice.
       MAX(cbg.acs_vintage) AS current_acs_vintage,
       MAX(cbg.population_prior_acs_vintage) AS prior_acs_vintage
-    FROM census_block_groups cbg, primary_ring pr, secondary_ring sr
-    WHERE cbg.geom && ST_SetSRID(ST_GeomFromGeoJSON($2), 4326); -- bbox filter so the GIST index is used
+    FROM census_block_groups cbg, primary_ring pr, secondary_ring sr, outer_ring o
+    WHERE cbg.geom && o.geom; -- bbox filter so the GIST index is used
   `;
 
   const { rows } = await query(sql, [
@@ -194,9 +208,9 @@ async function computeDemandAndGrowth(primaryGeoJSON, outerGeoJSON, { primaryRin
   ]);
 
   const row = rows[0];
-  const population =
-    primaryRingWeight * Number(row.primary_population) +
-    secondaryRingWeight * Number(row.secondary_population);
+  const primaryPopulation = Number(row.primary_population);
+  const secondaryPopulation = Number(row.secondary_population);
+  const population = primaryRingWeight * primaryPopulation + secondaryRingWeight * secondaryPopulation;
 
   // Same ring-weighted trade-area definition as `population` above (not just
   // the primary ring) -- docs/design.md 2.3 compares "the trade area's"
@@ -215,24 +229,31 @@ async function computeDemandAndGrowth(primaryGeoJSON, outerGeoJSON, { primaryRin
     growthRatePct,
     currentAcsVintage: row.current_acs_vintage,
     priorAcsVintage: row.prior_acs_vintage,
+    // Unweighted population across the whole outer ring (primary + secondary
+    // combined -- they partition the outer ring exactly, no gaps/overlap).
+    // computeCompetitorsPer1000 needs this same number for its per-1000
+    // rate; exposed here instead of that function re-querying
+    // census_block_groups a second time for an identical result.
+    tradeAreaPopulation: primaryPopulation + secondaryPopulation,
   };
 }
 
-async function computeCompetitorsPer1000(outerRingGeoJSON, categoryPatterns) {
+// `tradeAreaPopulation` comes from computeDemandAndGrowth's query -- the
+// population-weighted-by-area-overlap sum over the outer ring is identical
+// either way, so this only queries `places` for the count instead of
+// re-running that same census_block_groups computation a second time.
+async function computeCompetitorsPer1000(outerRingGeoJSON, categoryPatterns, tradeAreaPopulation) {
+  if (tradeAreaPopulation <= 0) return 0;
+
   const sql = `
     WITH trade_area AS (
       SELECT ST_SetSRID(ST_GeomFromGeoJSON($1), 4326) AS geom
     )
-    SELECT
-      (SELECT COUNT(*) FROM places p, trade_area t
-        WHERE p.geom && t.geom
-        AND ST_Within(p.geom, t.geom)
-        AND p.category_primary LIKE ANY($2::text[])) AS competitor_count,
-      (SELECT COALESCE(SUM(
-          cbg.population * ST_Area(ST_Intersection(cbg.geom, t.geom)) / NULLIF(ST_Area(cbg.geom), 0)
-        ), 0)
-        FROM census_block_groups cbg, trade_area t
-        WHERE cbg.geom && t.geom) AS trade_area_population;
+    SELECT COUNT(*) AS competitor_count
+    FROM places p, trade_area t
+    WHERE p.geom && t.geom
+    AND ST_Within(p.geom, t.geom)
+    AND p.category_primary LIKE ANY($2::text[]);
   `;
 
   // categoryPatterns is a fixed, hand-authored array from
@@ -240,10 +261,7 @@ async function computeCompetitorsPer1000(outerRingGeoJSON, categoryPatterns) {
   // no escaping is needed here -- entries with no '%' behave as an exact
   // match under LIKE, entries like '%_restaurant' are real wildcards.
   const { rows } = await query(sql, [JSON.stringify(outerRingGeoJSON), categoryPatterns]);
-  const { competitor_count, trade_area_population } = rows[0];
-  const population = Number(trade_area_population);
-  if (population <= 0) return 0;
-  return (Number(competitor_count) / population) * 1000;
+  return (Number(rows[0].competitor_count) / tradeAreaPopulation) * 1000;
 }
 
 async function computeComplementaryDraw(lat, lng) {

@@ -53,6 +53,17 @@
 // At 400 new calls/day, populating all ~2,775 combinations takes about 7
 // daily runs the first time. After that, every future run costs 0 new
 // calls unless the sample grid or a subtype's travel profile changes.
+//
+// SKIP-IF-FRESH (2026-08-26): re-running used to always re-sample every
+// active subtype in full, even one that finished days ago and hasn't
+// changed -- the isochrones were free (cached), but computeRawMetrics()
+// still ran fresh for all 925 points every time. Now, before sampling a
+// subtype, isSampleStillFresh() checks whether census_block_groups/places
+// have been touched (via their updated_at columns) since that subtype's
+// last completed sample, AND whether the grid spacing/bbox/isochrone
+// profile it was sampled with still match. Only skips if both hold; either
+// one failing forces a real resample. So it's now always safe and cheap to
+// just re-run this script after anything might have changed.
 
 import "dotenv/config";
 import { pool, query } from "../backend/src/db.js";
@@ -103,6 +114,8 @@ async function main() {
   const profiles = await loadActiveProfiles();
   console.log(`${profiles.length} active scoring profile(s): ${profiles.map((p) => p.subtype).join(", ")}`);
 
+  const latestDataUpdate = await loadLatestDataUpdate();
+
   let newOrsCalls = 0;
   let anySubtypeFailed = false;
 
@@ -112,6 +125,14 @@ async function main() {
     const competitorCategoryPatterns = SUBTYPE_COMPETITOR_CATEGORY_PATTERNS[profile.subtype];
     if (!competitorCategoryPatterns) {
       console.warn(`  No competitor category patterns defined for "${profile.subtype}" -- skipping.`);
+      continue;
+    }
+
+    if (isSampleStillFresh(profile, latestDataUpdate)) {
+      console.log(
+        `  Already sampled at ${profile.normalizationParams.sampledAt} with the same grid/isochrone ` +
+          `profile, and no census_block_groups/places changes since -- skipping.`
+      );
       continue;
     }
 
@@ -166,6 +187,13 @@ async function main() {
             // the mismatch logging in ingest-census.js for the current gap).
             sampledAt: new Date().toISOString(),
             sampleSize: samples.length,
+            // Snapshot of what this sample was actually built from -- lets
+            // isSampleStillFresh() detect a config change (grid spacing,
+            // bbox, or this subtype's isochrone profile) on a future run
+            // and force a resample, even if the data itself hasn't moved.
+            gridSpacingDegrees: GRID_SPACING_DEGREES,
+            bbox: BBOX,
+            isochroneProfile: profile.isochroneProfile,
           }),
         ]
       );
@@ -247,13 +275,70 @@ async function loadCachedKeys(isochroneProfile) {
 
 async function loadActiveProfiles() {
   const { rows } = await query(
-    `SELECT subtype, isochrone_profile FROM scoring_profiles WHERE is_active = true ORDER BY subtype`
+    `SELECT subtype, isochrone_profile, normalization_params FROM scoring_profiles WHERE is_active = true ORDER BY subtype`
   );
   // isochrone_profile already has the shape both getIsochrone/buildCacheKey
   // ({mode, rangesMinutes}) and computeRawMetrics's ringWeights
   // ({primaryRingWeight, secondaryRingWeight}) need -- each just destructures
   // the keys it cares about, so the same object is passed to both untouched.
-  return rows.map((row) => ({ subtype: row.subtype, isochroneProfile: row.isochrone_profile }));
+  // normalization_params is also loaded here (not just at write time) so
+  // isSampleStillFresh() can check it before deciding whether to resample.
+  return rows.map((row) => ({
+    subtype: row.subtype,
+    isochroneProfile: row.isochrone_profile,
+    normalizationParams: row.normalization_params,
+  }));
+}
+
+// The one signal that census_block_groups/places have changed since a
+// subtype's last sample: both ingest scripts upsert with
+// `updated_at = now()` (ingest-census.js, ingest-overture.sh), so this is
+// the most recent write to either table -- or null if one is still empty.
+async function loadLatestDataUpdate() {
+  const { rows } = await query(`
+    SELECT GREATEST(
+      (SELECT MAX(updated_at) FROM census_block_groups),
+      (SELECT MAX(updated_at) FROM places)
+    ) AS latest_data_update
+  `);
+  return rows[0].latest_data_update;
+}
+
+// Skips a subtype only if BOTH hold: (1) nothing in
+// census_block_groups/places has changed since it was last fully sampled,
+// and (2) the grid spacing, bbox, and this subtype's isochrone profile all
+// still match what it was sampled with. Either check failing means resample
+// -- this is meant to err toward resampling when unsure, never toward
+// silently serving a stale benchmark.
+function isSampleStillFresh(profile, latestDataUpdate) {
+  const params = profile.normalizationParams;
+  if (!params?.sampledAt) return false;
+
+  if (latestDataUpdate && new Date(params.sampledAt) <= new Date(latestDataUpdate)) {
+    return false;
+  }
+
+  return (
+    params.gridSpacingDegrees === GRID_SPACING_DEGREES &&
+    sameBbox(params.bbox, BBOX) &&
+    sameIsochroneProfile(params.isochroneProfile, profile.isochroneProfile)
+  );
+}
+
+function sameBbox(a, b) {
+  return Boolean(a) && a.minLng === b.minLng && a.minLat === b.minLat && a.maxLng === b.maxLng && a.maxLat === b.maxLat;
+}
+
+function sameIsochroneProfile(a, b) {
+  return (
+    Boolean(a) &&
+    a.mode === b.mode &&
+    a.primaryRingWeight === b.primaryRingWeight &&
+    a.secondaryRingWeight === b.secondaryRingWeight &&
+    Array.isArray(a.rangesMinutes) &&
+    a.rangesMinutes.length === b.rangesMinutes.length &&
+    a.rangesMinutes.every((v, i) => v === b.rangesMinutes[i])
+  );
 }
 
 function buildGrid() {

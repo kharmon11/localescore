@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { loadScoringProfile, NotFoundError } from "../scoring/profiles.js";
-import { getIsochrone } from "../services/isochrone.js";
+import { getIsochrone, OrsQuotaExceededError, OrsTransientError } from "../services/isochrone.js";
 import { computeRawMetrics } from "../services/spatialQueries.js";
 import { computeScore } from "../scoring/engine.js";
 
@@ -75,6 +75,20 @@ scoreRouter.post("/score", async (req, res) => {
     if (err instanceof NotFoundError) {
       return res.status(404).json({ error: err.message });
     }
+    if (err instanceof OrsQuotaExceededError) {
+      console.warn(err.message);
+      return res.status(503).json({
+        error: "This site's routing data is temporarily unavailable -- the daily map-routing quota has been used up. Please try again later.",
+        kind: "quota_exceeded",
+      });
+    }
+    if (err instanceof OrsTransientError) {
+      console.error(err);
+      return res.status(502).json({
+        error: "Temporary problem reaching the map-routing service. Please try again.",
+        kind: "transient",
+      });
+    }
     // eslint-disable-next-line no-console
     console.error(err);
     res.status(500).json({ error: "Failed to compute score. See server logs for details." });
@@ -90,7 +104,7 @@ scoreRouter.post("/score", async (req, res) => {
 // guess -- see the vintage-label columns added in
 // db/migrations/003_prior_acs_vintage_label.sql) rather than just saying
 // "approximate" with no specifics.
-function growthTrendNote(currentAcsVintage, priorAcsVintage) {
+export function growthTrendNote(currentAcsVintage, priorAcsVintage) {
   const current = formatAcsVintageRange(currentAcsVintage);
   const prior = formatAcsVintageRange(priorAcsVintage);
   if (!current || !prior) {
@@ -101,14 +115,14 @@ function growthTrendNote(currentAcsVintage, priorAcsVintage) {
 
 // '2024-5yr' -> '2020–2024' (a 5-year ACS vintage labeled YYYY covers
 // (YYYY-4) through YYYY).
-function formatAcsVintageRange(vintageLabel) {
+export function formatAcsVintageRange(vintageLabel) {
   const match = /^(\d{4})-5yr$/.exec(vintageLabel ?? "");
   if (!match) return null;
   const endYear = Number(match[1]);
   return `${endYear - 4}–${endYear}`;
 }
 
-function validateRequest({ lat, lng, subtype }) {
+export function validateRequest({ lat, lng, subtype }) {
   if (typeof lat !== "number" || lat < -90 || lat > 90) {
     return "lat must be a number between -90 and 90";
   }

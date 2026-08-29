@@ -11,17 +11,17 @@ const ORS_BASE_URL = "https://api.heigit.org/openrouteservice/v2/isochrones";
 
 /**
  * Returns a GeoJSON FeatureCollection of isochrone rings for a point,
- * checking isochrone_cache first (docs/design.md section 3.2) before
- * calling OpenRouteService/HeiGIT. This is what keeps a demo well inside
- * the isochrones quota under repeated clicks -- note that quota is much
- * smaller than docs/design.md's original "2,500 requests/day" claim (that
- * was accurate for the old api.openrouteservice.org tier, not the current
- * HeiGIT one; a real account dashboard checked 2026-08-19 showed 500 total
- * + a 20-requests/minute cap for Isochrones V2, not a flat daily count).
+ * checking isochrone_cache first before calling OpenRouteService/HeiGIT.
+ *
+ * On a cache miss, a non-403 failure (bad gateway, dropped connection, or
+ * ORS_REQUEST_TIMEOUT_MS elapsing with no response) is retried once after a
+ * short delay before giving up; a 403 (quota exhausted) is never retried.
  *
  * @param {number} lat
  * @param {number} lng
  * @param {{mode: string, rangesMinutes: number[]}} isochroneProfile
+ * @throws {OrsQuotaExceededError} if the account's daily ORS/HeiGIT quota is exhausted
+ * @throws {OrsTransientError} if the request fails and the one retry also fails
  */
 export async function getIsochrone(lat, lng, isochroneProfile) {
   const cacheKey = buildCacheKey(lat, lng, isochroneProfile);
@@ -34,7 +34,7 @@ export async function getIsochrone(lat, lng, isochroneProfile) {
     return cached.rows[0].geojson;
   }
 
-  const geojson = await fetchFromOpenRouteService(lat, lng, isochroneProfile);
+  const geojson = await fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile);
 
   await query(
     `INSERT INTO isochrone_cache (cache_key, lat, lng, travel_profile, ranges_minutes, geojson)
@@ -53,6 +53,58 @@ export async function getIsochrone(lat, lng, isochroneProfile) {
   return geojson;
 }
 
+// ORS/HeiGIT isochrone requests normally return in well under a second; this
+// bounds a hung connection so it fails fast into the retry path instead of
+// leaving a live map click stuck indefinitely.
+const ORS_REQUEST_TIMEOUT_MS = 10000;
+
+// Real daily quota exhaustion (500/day account cap) -- confirmed to always
+// come back as HTTP 403 with body {"error": "Quota exceeded"}. Not
+// retry-worthy: retrying immediately will just fail again.
+export class OrsQuotaExceededError extends Error {
+  constructor(status, body) {
+    super(`OpenRouteService quota exceeded (${status}): ${body}`);
+    this.name = "OrsQuotaExceededError";
+    this.status = status;
+  }
+}
+
+// Everything else that keeps a request from succeeding: a non-403 HTTP
+// error response (502 Bad Gateway has been observed; the documented
+// 20-requests/minute cap would also land here as a 429), or the fetch()
+// call itself never getting a response at all (dropped connection, DNS
+// hiccup, or our own ORS_REQUEST_TIMEOUT_MS firing). Both have been observed
+// to resolve on a simple retry, so these are treated as retry-worthy blips
+// rather than a hard failure.
+export class OrsTransientError extends Error {
+  constructor(message, { cause } = {}) {
+    super(message);
+    this.name = "OrsTransientError";
+    if (cause) this.cause = cause;
+  }
+}
+
+// A brief pause before the one retry below, giving a genuine network blip
+// (dropped packet, DNS hiccup) a moment to clear. Not measured against real
+// failures -- short enough to be invisible next to an isochrone request's
+// normal latency, long enough to not just immediately repeat the same
+// failure.
+const ORS_RETRY_DELAY_MS = 500;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Retries exactly once, and only for OrsTransientError -- OrsQuotaExceededError
+// and anything else propagate immediately, since retrying won't help either.
+async function fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile) {
+  try {
+    return await fetchFromOpenRouteService(lat, lng, isochroneProfile);
+  } catch (err) {
+    if (!(err instanceof OrsTransientError)) throw err;
+    await sleep(ORS_RETRY_DELAY_MS);
+    return fetchFromOpenRouteService(lat, lng, isochroneProfile);
+  }
+}
+
 async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
   if (!process.env.ORS_API_KEY) {
     throw new Error(
@@ -62,22 +114,39 @@ async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
 
   const rangeSeconds = rangesMinutes.map((m) => m * 60);
 
-  const res = await fetch(`${ORS_BASE_URL}/${mode}`, {
-    method: "POST",
-    headers: {
-      Authorization: process.env.ORS_API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      locations: [[lng, lat]], // ORS wants [lng, lat], not [lat, lng]
-      range: rangeSeconds,
-      range_type: "time",
-    }),
-  });
+  let res;
+  try {
+    res = await fetch(`${ORS_BASE_URL}/${mode}`, {
+      method: "POST",
+      headers: {
+        Authorization: process.env.ORS_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locations: [[lng, lat]], // ORS wants [lng, lat], not [lat, lng]
+        range: rangeSeconds,
+        range_type: "time",
+      }),
+      signal: AbortSignal.timeout(ORS_REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // fetch() itself rejected -- no HTTP response was ever received, so
+    // there's no status code to classify by. Could be a dropped connection,
+    // a DNS hiccup (Node's generic "fetch failed"), or the timeout above
+    // firing (a DOMException named "TimeoutError"). All three are
+    // indistinguishable from here and all three are retry-worthy.
+    throw new OrsTransientError(
+      `OpenRouteService isochrone request failed before a response was received: ${err.message}`,
+      { cause: err }
+    );
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`OpenRouteService isochrone request failed (${res.status}): ${body}`);
+    if (res.status === 403) {
+      throw new OrsQuotaExceededError(res.status, body);
+    }
+    throw new OrsTransientError(`OpenRouteService isochrone request failed (${res.status}): ${body}`);
   }
 
   return res.json();

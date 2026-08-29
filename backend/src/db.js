@@ -14,6 +14,12 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+// Without a listener, an idle client's network error crashes the process;
+// pg replaces the client automatically once this is handled.
+pool.on("error", (err) => {
+  console.error("Unexpected error on idle database client:", err);
+});
+
 /**
  * Thin query helper. Kept intentionally dumb -- this project uses raw,
  * parameterized SQL for spatial queries rather than an ORM (see

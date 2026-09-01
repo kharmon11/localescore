@@ -33,6 +33,20 @@ const isochroneLineLayer = {
   },
 };
 
+const styles = {
+  missingToken: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    padding: 24,
+    textAlign: "center",
+    color: "#898781",
+    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    fontSize: 14,
+  },
+};
+
 export default function MapView({ subtype, onPointSelected, isochroneGeoJSON, selectedPoint }) {
   const [cursor, setCursor] = useState("auto");
 
@@ -75,17 +89,3 @@ export default function MapView({ subtype, onPointSelected, isochroneGeoJSON, se
     </Map>
   );
 }
-
-const styles = {
-  missingToken: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100%",
-    padding: 24,
-    textAlign: "center",
-    color: "#898781",
-    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    fontSize: 14,
-  },
-};

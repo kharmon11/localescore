@@ -38,6 +38,46 @@ export const SUBTYPE_COMPETITOR_CATEGORY_PATTERNS = {
   dinner_destination: ["restaurant", "%_restaurant"],
 };
 
+export function validateRequest({ lat, lng, subtype }) {
+  if (typeof lat !== "number" || lat < -90 || lat > 90) {
+    return "lat must be a number between -90 and 90";
+  }
+  if (typeof lng !== "number" || lng < -180 || lng > 180) {
+    return "lng must be a number between -180 and 180";
+  }
+  if (!Object.keys(SUBTYPE_COMPETITOR_CATEGORY_PATTERNS).includes(subtype)) {
+    return `subtype must be one of: ${Object.keys(SUBTYPE_COMPETITOR_CATEGORY_PATTERNS).join(", ")}`;
+  }
+  return null;
+}
+
+// '2024-5yr' -> '2020–2024' (a 5-year ACS vintage labeled YYYY covers
+// (YYYY-4) through YYYY).
+export function formatAcsVintageRange(vintageLabel) {
+  const match = /^(\d{4})-5yr$/.exec(vintageLabel ?? "");
+  if (!match) return null;
+  const endYear = Number(match[1]);
+  return `${endYear - 4}–${endYear}`;
+}
+
+// Growth Trend compares two ACS *5-year* estimates several years apart, not
+// a true year-over-year rate -- the Census Bureau only publishes 1-year
+// estimates for geographies with 65,000+ people, which block groups never
+// hit (docs/design.md 2.3, scripts/ingest-census.js). This surfaces that
+// limitation to the UI in plain language, with the *actual* years being
+// compared (read from the ingested data via rawMetrics, not a hardcoded
+// guess -- see the vintage-label columns added in
+// db/migrations/003_prior_acs_vintage_label.sql) rather than just saying
+// "approximate" with no specifics.
+export function growthTrendNote(currentAcsVintage, priorAcsVintage) {
+  const current = formatAcsVintageRange(currentAcsVintage);
+  const prior = formatAcsVintageRange(priorAcsVintage);
+  if (!current || !prior) {
+    return "Approximate multi-year trend, not a true year-over-year rate -- vintage data unavailable for this trade area.";
+  }
+  return `Approximate: compares ${prior} vs. ${current} 5-year Census estimates, not a true year-over-year rate (block groups don't get 1-year Census data).`;
+}
+
 scoreRouter.post("/score", async (req, res) => {
   const { lat, lng, subtype, weights: weightsOverride } = req.body ?? {};
 
@@ -106,43 +146,3 @@ scoreRouter.post("/score", async (req, res) => {
     res.status(500).json({ error: "Failed to compute score. See server logs for details." });
   }
 });
-
-// Growth Trend compares two ACS *5-year* estimates several years apart, not
-// a true year-over-year rate -- the Census Bureau only publishes 1-year
-// estimates for geographies with 65,000+ people, which block groups never
-// hit (docs/design.md 2.3, scripts/ingest-census.js). This surfaces that
-// limitation to the UI in plain language, with the *actual* years being
-// compared (read from the ingested data via rawMetrics, not a hardcoded
-// guess -- see the vintage-label columns added in
-// db/migrations/003_prior_acs_vintage_label.sql) rather than just saying
-// "approximate" with no specifics.
-export function growthTrendNote(currentAcsVintage, priorAcsVintage) {
-  const current = formatAcsVintageRange(currentAcsVintage);
-  const prior = formatAcsVintageRange(priorAcsVintage);
-  if (!current || !prior) {
-    return "Approximate multi-year trend, not a true year-over-year rate -- vintage data unavailable for this trade area.";
-  }
-  return `Approximate: compares ${prior} vs. ${current} 5-year Census estimates, not a true year-over-year rate (block groups don't get 1-year Census data).`;
-}
-
-// '2024-5yr' -> '2020–2024' (a 5-year ACS vintage labeled YYYY covers
-// (YYYY-4) through YYYY).
-export function formatAcsVintageRange(vintageLabel) {
-  const match = /^(\d{4})-5yr$/.exec(vintageLabel ?? "");
-  if (!match) return null;
-  const endYear = Number(match[1]);
-  return `${endYear - 4}–${endYear}`;
-}
-
-export function validateRequest({ lat, lng, subtype }) {
-  if (typeof lat !== "number" || lat < -90 || lat > 90) {
-    return "lat must be a number between -90 and 90";
-  }
-  if (typeof lng !== "number" || lng < -180 || lng > 180) {
-    return "lng must be a number between -180 and 180";
-  }
-  if (!Object.keys(SUBTYPE_COMPETITOR_CATEGORY_PATTERNS).includes(subtype)) {
-    return `subtype must be one of: ${Object.keys(SUBTYPE_COMPETITOR_CATEGORY_PATTERNS).join(", ")}`;
-  }
-  return null;
-}

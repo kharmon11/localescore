@@ -62,15 +62,6 @@ const TRANSIT_WEIGHT = 0.25;
  * @param {number} lng
  * @returns {Promise<number>} 0-100
  */
-export async function computeAccessibility(lat, lng) {
-  const [roadClassScore, transitScore] = await Promise.all([
-    computeRoadClassScore(lat, lng),
-    computeTransitScore(lat, lng),
-  ]);
-
-  return ROAD_CLASS_WEIGHT * roadClassScore + TRANSIT_WEIGHT * transitScore;
-}
-
 async function computeRoadClassScore(lat, lng) {
   // KNN nearest-neighbor via the `<->` operator + GIST index on geom
   // (idx_road_segments_geom); ST_DWithin bounds it to a "some road actually
@@ -106,4 +97,13 @@ async function computeTransitScore(lat, lng) {
   const { rows } = await query(sql, [lng, lat, TRANSIT_RADIUS_METERS, TRANSIT_CATEGORIES]);
   const count = Number(rows[0].n);
   return Math.min(100, count * 50); // 1 stop within reach -> 50, 2+ -> 100
+}
+
+export async function computeAccessibility(lat, lng) {
+  const [roadClassScore, transitScore] = await Promise.all([
+    computeRoadClassScore(lat, lng),
+    computeTransitScore(lat, lng),
+  ]);
+
+  return ROAD_CLASS_WEIGHT * roadClassScore + TRANSIT_WEIGHT * transitScore;
 }

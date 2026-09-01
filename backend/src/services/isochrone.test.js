@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-// See db.test.js for why DATABASE_URL is stubbed before a dynamic import --
+// See db.test.js for why DATABASE_URL is stubbed before a dynamic import.
 // getIsochrone caches through db.js's pool, but never actually connects
 // (pool.query is mocked in every test below). ORS_API_KEY is stubbed too,
 // since fetchFromOpenRouteService checks for it before ever calling fetch().
@@ -25,10 +25,11 @@ function withMocks({ queryImpl, fetchImpl }, fn) {
   });
 }
 
-function orsResponse(status, body) {
+function orsResponse(status, body, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(headers),
     text: async () => body,
     json: async () => JSON.parse(body),
   };
@@ -49,10 +50,12 @@ test("buildCacheKey rounds to 4 decimal places and varies by profile", () => {
   assert.notEqual(a, differentMode);
 });
 
-test("OrsQuotaExceededError carries the status and a descriptive message", () => {
-  const err = new OrsQuotaExceededError(403, '{"error":"Quota exceeded"}');
+test("OrsQuotaExceededError carries the status, resetAt, and a descriptive message", () => {
+  const resetAt = new Date("2026-09-01T00:15:00.000Z");
+  const err = new OrsQuotaExceededError(403, '{"error":"Quota exceeded"}', resetAt);
   assert.equal(err.name, "OrsQuotaExceededError");
   assert.equal(err.status, 403);
+  assert.equal(err.resetAt, resetAt);
   assert.match(err.message, /403/);
   assert.match(err.message, /Quota exceeded/);
 });
@@ -106,22 +109,48 @@ test("getIsochrone fetches and caches on a cache miss", async () => {
   );
 });
 
-test("getIsochrone throws OrsQuotaExceededError on a 403 with no retry", async () => {
+test("getIsochrone throws OrsQuotaExceededError with resetAt from x-ratelimit-reset on a 403, with no retry", async () => {
   let fetchCalls = 0;
+  const resetEpochSeconds = 1893456000;
   await withMocks(
     {
       queryImpl: async () => ({ rows: [] }),
       fetchImpl: async () => {
         fetchCalls++;
-        return orsResponse(403, '{"error":"Quota exceeded"}');
+        return orsResponse(403, '{"error":"Quota exceeded"}', {
+          "x-ratelimit-reset": String(resetEpochSeconds),
+        });
       },
     },
     async () => {
       await assert.rejects(
         () => getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE),
-        OrsQuotaExceededError
+        (err) => {
+          assert.ok(err instanceof OrsQuotaExceededError);
+          assert.equal(err.resetAt.getTime(), resetEpochSeconds * 1000);
+          return true;
+        }
       );
       assert.equal(fetchCalls, 1, "quota errors are not retried");
+    }
+  );
+});
+
+test("getIsochrone's OrsQuotaExceededError has a null resetAt when x-ratelimit-reset is missing", async () => {
+  await withMocks(
+    {
+      queryImpl: async () => ({ rows: [] }),
+      fetchImpl: async () => orsResponse(403, '{"error":"Quota exceeded"}'),
+    },
+    async () => {
+      await assert.rejects(
+        () => getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE),
+        (err) => {
+          assert.ok(err instanceof OrsQuotaExceededError);
+          assert.equal(err.resetAt, null);
+          return true;
+        }
+      );
     }
   );
 });
@@ -201,6 +230,50 @@ test("getIsochrone classifies an aborted/timed-out request as transient", async 
         OrsTransientError
       );
       assert.equal(fetchCalls, 2, "exactly one retry, then give up");
+    }
+  );
+});
+
+test("getIsochrone passes a real AbortSignal to fetch() when a caller signal is given", async () => {
+  const controller = new AbortController();
+  let receivedSignal;
+  await withMocks(
+    {
+      queryImpl: async () => ({ rows: [] }),
+      fetchImpl: async (url, options) => {
+        receivedSignal = options.signal;
+        return orsResponse(200, JSON.stringify(FIXTURE_GEOJSON));
+      },
+    },
+    async () => {
+      await getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE, controller.signal);
+      assert.ok(receivedSignal instanceof AbortSignal);
+      assert.equal(receivedSignal.aborted, false);
+
+      controller.abort();
+      assert.equal(receivedSignal.aborted, true, "the combined signal follows the caller's signal");
+    }
+  );
+});
+
+test("getIsochrone does not retry a transient failure once the caller's signal is already aborted", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let fetchCalls = 0;
+  await withMocks(
+    {
+      queryImpl: async () => ({ rows: [] }),
+      fetchImpl: async () => {
+        fetchCalls++;
+        return orsResponse(502, "Bad Gateway");
+      },
+    },
+    async () => {
+      await assert.rejects(
+        () => getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE, controller.signal),
+        OrsTransientError
+      );
+      assert.equal(fetchCalls, 1, "no point retrying for a caller that's already gone");
     }
   );
 });

@@ -45,18 +45,6 @@ export default function SubscoreChart({ subscores, notes }) {
           --series-1: #2a78d6;
           --series-1-hover: #1c5cab;
         }
-        @media (prefers-color-scheme: dark) {
-          .subscore-chart:not([data-theme="light"]) {
-            color-scheme: dark;
-            --surface-1: #1a1a19;
-            --text-primary: #ffffff;
-            --text-secondary: #c3c2b7;
-            --text-muted: #898781;
-            --gridline: #2c2c2a;
-            --series-1: #3987e5;
-            --series-1-hover: #5598e7;
-          }
-        }
         .subscore-chart {
           background: var(--surface-1);
           font-family: system-ui, -apple-system, "Segoe UI", sans-serif;

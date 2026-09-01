@@ -46,10 +46,17 @@ scoreRouter.post("/score", async (req, res) => {
     return res.status(400).json({ error: validationError });
   }
 
+  // Lets a superseded client request cancel our downstream ORS call instead
+  // of wasting a real quota call on a response nobody will read.
+  const clientDisconnected = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) clientDisconnected.abort();
+  });
+
   try {
     const profile = await loadScoringProfile(subtype, weightsOverride);
 
-    const isochroneGeoJSON = await getIsochrone(lat, lng, profile.isochroneProfile);
+    const isochroneGeoJSON = await getIsochrone(lat, lng, profile.isochroneProfile, clientDisconnected.signal);
 
     const rawMetrics = await computeRawMetrics(
       lat,
@@ -60,6 +67,8 @@ scoreRouter.post("/score", async (req, res) => {
     );
 
     const result = computeScore(rawMetrics, profile);
+
+    if (clientDisconnected.signal.aborted) return;
 
     res.json({
       ...result,
@@ -72,21 +81,24 @@ scoreRouter.post("/score", async (req, res) => {
       },
     });
   } catch (err) {
+    if (clientDisconnected.signal.aborted) return;
+
     if (err instanceof NotFoundError) {
       return res.status(404).json({ error: err.message });
     }
     if (err instanceof OrsQuotaExceededError) {
       console.warn(err.message);
       return res.status(503).json({
-        error: "This site's routing data is temporarily unavailable -- the daily map-routing quota has been used up. Please try again later.",
-        kind: "quota_exceeded",
+        error: "Openrouteservice data is temporarily unavailable -- the daily map-routing quota has been used up. Please try again later.",
+        type: "quota_exceeded",
+        resetAt: err.resetAt ? err.resetAt.toISOString() : null,
       });
     }
     if (err instanceof OrsTransientError) {
       console.error(err);
       return res.status(502).json({
         error: "Temporary problem reaching the map-routing service. Please try again.",
-        kind: "transient",
+        type: "transient",
       });
     }
     // eslint-disable-next-line no-console

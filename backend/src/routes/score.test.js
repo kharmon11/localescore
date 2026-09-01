@@ -68,10 +68,11 @@ function happyPathQueryMock(text) {
   throw new Error(`Unhandled query in test mock: ${text}`);
 }
 
-function orsResponse(status, body) {
+function orsResponse(status, body, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(headers),
     text: async () => body,
     json: async () => JSON.parse(body),
   };
@@ -88,7 +89,7 @@ function startServer() {
 
 // pool.query and fetch are both mocked for the duration of `fn`, so `fn`
 // receives the real, unmocked fetch to make its own request into the test
-// server with -- using the (mocked) global fetch for that would recurse into
+// server with. Using the (mocked) global fetch for that would recurse into
 // the ORS mock instead of hitting the server.
 async function withTestServer({ queryImpl, fetchImpl } = {}, fn) {
   const originalQuery = pool.query;
@@ -122,7 +123,7 @@ async function postScore(realFetch, port, body) {
   return { status: res.status, body: json };
 }
 
-// -- validateRequest --------------------------------------------------------
+// validateRequest
 
 test("validateRequest accepts a valid request", () => {
   assert.equal(validateRequest({ lat: 41.25, lng: -95.93, subtype: "coffee_shop" }), null);
@@ -152,7 +153,7 @@ test("validateRequest rejects an unknown subtype", () => {
   assert.match(error, /coffee_shop/);
 });
 
-// -- formatAcsVintageRange ---------------------------------------------------
+// formatAcsVintageRange
 
 test("formatAcsVintageRange formats a well-formed vintage label", () => {
   assert.equal(formatAcsVintageRange("2024-5yr"), "2020–2024");
@@ -166,7 +167,7 @@ test("formatAcsVintageRange returns null for malformed or missing input", () => 
   assert.equal(formatAcsVintageRange(""), null);
 });
 
-// -- growthTrendNote ----------------------------------------------------------
+// growthTrendNote
 
 test("growthTrendNote formats both vintages when present", () => {
   const note = growthTrendNote("2024-5yr", "2019-5yr");
@@ -181,7 +182,7 @@ test("growthTrendNote falls back to a generic message when a vintage is missing"
   assert.match(growthTrendNote(null, null), /vintage data unavailable/);
 });
 
-// -- POST /score --------------------------------------------------------------
+// POST /score
 
 test("POST /score returns 400 for an invalid request with no downstream calls", async () => {
   await withTestServer({}, async (port, realFetch) => {
@@ -210,11 +211,15 @@ test("POST /score returns 404 when no active scoring profile exists for the subt
   );
 });
 
-test("POST /score returns 503 with kind quota_exceeded when the ORS quota is exhausted", async () => {
+test("POST /score returns 503 with type quota_exceeded and resetAt when the ORS quota is exhausted", async () => {
+  const resetEpochSeconds = 1893456000;
   await withTestServer(
     {
       queryImpl: happyPathQueryMock,
-      fetchImpl: async () => orsResponse(403, '{"error":"Quota exceeded"}'),
+      fetchImpl: async () =>
+        orsResponse(403, '{"error":"Quota exceeded"}', {
+          "x-ratelimit-reset": String(resetEpochSeconds),
+        }),
     },
     async (port, realFetch) => {
       const { status, body } = await postScore(realFetch, port, {
@@ -223,12 +228,13 @@ test("POST /score returns 503 with kind quota_exceeded when the ORS quota is exh
         subtype: "coffee_shop",
       });
       assert.equal(status, 503);
-      assert.equal(body.kind, "quota_exceeded");
+      assert.equal(body.type, "quota_exceeded");
+      assert.equal(body.resetAt, new Date(resetEpochSeconds * 1000).toISOString());
     }
   );
 });
 
-test("POST /score returns 502 with kind transient when ORS fails and the retry also fails", async () => {
+test("POST /score returns 502 with type transient when ORS fails and the retry also fails", async () => {
   await withTestServer(
     {
       queryImpl: happyPathQueryMock,
@@ -241,7 +247,7 @@ test("POST /score returns 502 with kind transient when ORS fails and the retry a
         subtype: "coffee_shop",
       });
       assert.equal(status, 502);
-      assert.equal(body.kind, "transient");
+      assert.equal(body.type, "transient");
     }
   );
 });
@@ -290,7 +296,43 @@ test("POST /score returns a generic 500 for an unexpected internal error, withou
       });
       assert.equal(status, 500);
       assert.equal(body.error, "Failed to compute score. See server logs for details.");
-      assert.equal(body.kind, undefined, "the generic fallback should not include a kind field");
+      assert.equal(body.type, undefined, "the generic fallback should not include a type field");
+    }
+  );
+});
+
+test("POST /score cancels the ORS call and skips the retry when the client disconnects", async () => {
+  let fetchCalls = 0;
+  await withTestServer(
+    {
+      queryImpl: happyPathQueryMock,
+      // Never resolves on its own; only settles if its signal is aborted,
+      // same as a real fetch() would when the client disconnects.
+      fetchImpl: (url, options) =>
+        new Promise((resolve, reject) => {
+          fetchCalls++;
+          options.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          });
+        }),
+    },
+    async (port, realFetch) => {
+      const controller = new AbortController();
+      const requestPromise = realFetch(`http://127.0.0.1:${port}/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: 41.25, lng: -95.93, subtype: "coffee_shop" }),
+        signal: controller.signal,
+      });
+
+      // Give the server time to reach the ORS fetch call before disconnecting.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      controller.abort();
+      await assert.rejects(() => requestPromise, { name: "AbortError" });
+
+      // Give the server's res.on("close") handler time to fire.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(fetchCalls, 1, "a disconnected client should not trigger a retry");
     }
   );
 });

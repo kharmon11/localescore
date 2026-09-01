@@ -20,10 +20,11 @@ const ORS_BASE_URL = "https://api.heigit.org/openrouteservice/v2/isochrones";
  * @param {number} lat
  * @param {number} lng
  * @param {{mode: string, rangesMinutes: number[]}} isochroneProfile
+ * @param {AbortSignal} [signal] aborts the ORS call if the client disconnects
  * @throws {OrsQuotaExceededError} if the account's daily ORS/HeiGIT quota is exhausted
  * @throws {OrsTransientError} if the request fails and the one retry also fails
  */
-export async function getIsochrone(lat, lng, isochroneProfile) {
+export async function getIsochrone(lat, lng, isochroneProfile, signal) {
   const cacheKey = buildCacheKey(lat, lng, isochroneProfile);
 
   const cached = await query(
@@ -34,7 +35,7 @@ export async function getIsochrone(lat, lng, isochroneProfile) {
     return cached.rows[0].geojson;
   }
 
-  const geojson = await fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile);
+  const geojson = await fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile, signal);
 
   await query(
     `INSERT INTO isochrone_cache (cache_key, lat, lng, travel_profile, ranges_minutes, geojson)
@@ -58,14 +59,15 @@ export async function getIsochrone(lat, lng, isochroneProfile) {
 // leaving a live map click stuck indefinitely.
 const ORS_REQUEST_TIMEOUT_MS = 10000;
 
-// Real daily quota exhaustion (500/day account cap) -- confirmed to always
-// come back as HTTP 403 with body {"error": "Quota exceeded"}. Not
-// retry-worthy: retrying immediately will just fail again.
+// Real daily quota exhaustion (500/day account cap). Always comes back as
+// HTTP 403 with body {"error": "Quota exceeded"}. Not retry-worthy:
+// retrying immediately will just fail again.
 export class OrsQuotaExceededError extends Error {
-  constructor(status, body) {
+  constructor(status, body, resetAt) {
     super(`OpenRouteService quota exceeded (${status}): ${body}`);
     this.name = "OrsQuotaExceededError";
     this.status = status;
+    this.resetAt = resetAt; // Date, or null if x-ratelimit-reset was missing
   }
 }
 
@@ -86,26 +88,26 @@ export class OrsTransientError extends Error {
 
 // A brief pause before the one retry below, giving a genuine network blip
 // (dropped packet, DNS hiccup) a moment to clear. Not measured against real
-// failures -- short enough to be invisible next to an isochrone request's
+// failures. Short enough to be invisible next to an isochrone request's
 // normal latency, long enough to not just immediately repeat the same
 // failure.
 const ORS_RETRY_DELAY_MS = 500;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Retries exactly once, and only for OrsTransientError -- OrsQuotaExceededError
-// and anything else propagate immediately, since retrying won't help either.
-async function fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile) {
+// Retries once, only for OrsTransientError. Propagates immediately for
+// OrsQuotaExceededError, anything else, or an already-disconnected client.
+async function fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile, signal) {
   try {
-    return await fetchFromOpenRouteService(lat, lng, isochroneProfile);
+    return await fetchFromOpenRouteService(lat, lng, isochroneProfile, signal);
   } catch (err) {
-    if (!(err instanceof OrsTransientError)) throw err;
+    if (!(err instanceof OrsTransientError) || signal?.aborted) throw err;
     await sleep(ORS_RETRY_DELAY_MS);
-    return fetchFromOpenRouteService(lat, lng, isochroneProfile);
+    return fetchFromOpenRouteService(lat, lng, isochroneProfile, signal);
   }
 }
 
-async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
+async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }, signal) {
   if (!process.env.ORS_API_KEY) {
     throw new Error(
       "ORS_API_KEY is not set. Get a free key at https://openrouteservice.org/dev/#/signup and add it to backend/.env"
@@ -127,10 +129,12 @@ async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
         range: rangeSeconds,
         range_type: "time",
       }),
-      signal: AbortSignal.timeout(ORS_REQUEST_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([AbortSignal.timeout(ORS_REQUEST_TIMEOUT_MS), signal])
+        : AbortSignal.timeout(ORS_REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    // fetch() itself rejected -- no HTTP response was ever received, so
+    // fetch() itself rejected. No HTTP response was ever received, so
     // there's no status code to classify by. Could be a dropped connection,
     // a DNS hiccup (Node's generic "fetch failed"), or the timeout above
     // firing (a DOMException named "TimeoutError"). All three are
@@ -144,7 +148,11 @@ async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }) {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     if (res.status === 403) {
-      throw new OrsQuotaExceededError(res.status, body);
+      // x-ratelimit-reset is Unix epoch seconds (confirmed against a real
+      // response), telling us when capacity is expected back.
+      const resetHeader = res.headers.get("x-ratelimit-reset");
+      const resetAt = resetHeader ? new Date(Number(resetHeader) * 1000) : null;
+      throw new OrsQuotaExceededError(res.status, body, resetAt);
     }
     throw new OrsTransientError(`OpenRouteService isochrone request failed (${res.status}): ${body}`);
   }

@@ -12,19 +12,36 @@ const BAND_STYLES = {
   weak: { color: "#d03b3b", label: "Weak site" },
 };
 
-export default function ScoreCard({ result }) {
-  if (!result) {
+export default function ScoreCard({ result, error, loading, onRetry }) {
+  return <div style={styles.card}>{cardContent({ result, error, loading, onRetry })}</div>;
+}
+
+function cardContent({ result, error, loading, onRetry }) {
+  if (loading) {
+    return <p style={styles.status}>Scoring…</p>;
+  }
+
+  if (error) {
     return (
-      <div style={styles.card}>
-        <p style={styles.placeholder}>Click a point on the map to score it.</p>
-      </div>
+      <>
+        <p style={styles.error}>{formatErrorMessage(error)}</p>
+        {error.type === "transient" && (
+          <button type="button" style={styles.retryButton} onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </>
     );
+  }
+
+  if (!result) {
+    return <p style={styles.placeholder}>Click a point on the map to score it.</p>;
   }
 
   const band = BAND_STYLES[result.band] ?? BAND_STYLES.marginal;
 
   return (
-    <div style={styles.card}>
+    <>
       <div style={styles.heroRow}>
         <span style={styles.hero}>{result.overall}</span>
         <span style={{ ...styles.badge, color: band.color, borderColor: band.color }}>
@@ -36,8 +53,29 @@ export default function ScoreCard({ result }) {
         <p style={styles.overrideNote}>Custom weights applied (not the saved profile).</p>
       )}
       <SubscoreChart subscores={result.subscores} notes={result.notes} />
-    </div>
+    </>
   );
+}
+
+// For a quota_exceeded error with a valid resetAt, build a message with the
+// actual time (and date, if it's not today) the user can try again,
+// computed in the browser's own local timezone, since the backend (running
+// on Cloud Run) can't know the viewer's timezone. Falls back to the
+// backend's own message for every other error, or if resetAt is missing.
+function formatErrorMessage(error) {
+  if (error.type === "quota_exceeded" && error.resetAt) {
+    const resetDate = new Date(error.resetAt);
+    if (!Number.isNaN(resetDate.getTime())) {
+      const now = new Date();
+      const time = resetDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      if (resetDate.toDateString() === now.toDateString()) {
+        return `Openrouteservice data is temporarily unavailable. You can try again at ${time}.`;
+      }
+      const date = resetDate.toLocaleDateString([], { month: "short", day: "numeric" });
+      return `Openrouteservice data is temporarily unavailable. You can try again at ${time} on ${date}.`;
+    }
+  }
+  return error.message;
 }
 
 const styles = {
@@ -53,6 +91,27 @@ const styles = {
     color: "#898781",
     fontSize: 14,
     margin: 0,
+  },
+  status: {
+    fontSize: 13,
+    color: "#52514e",
+    margin: 0,
+  },
+  error: {
+    fontSize: 13,
+    color: "#d03b3b",
+    margin: 0,
+  },
+  retryButton: {
+    marginTop: 8,
+    padding: "4px 10px",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#2a78d6",
+    background: "#fff",
+    border: "1px solid #2a78d6",
+    borderRadius: 6,
+    cursor: "pointer",
   },
   heroRow: {
     display: "flex",

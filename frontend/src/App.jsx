@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import MapView from "./components/MapView.jsx";
 import SubtypeSelector from "./components/SubtypeSelector.jsx";
 import ScoreCard from "./components/ScoreCard.jsx";
@@ -10,20 +10,28 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const requestRef = useRef({ id: 0, controller: null });
 
   const handlePointSelected = useCallback(
     async ({ lat, lng }) => {
+      requestRef.current.controller?.abort();
+      const requestId = ++requestRef.current.id;
+      const controller = new AbortController();
+      requestRef.current.controller = controller;
+
       setSelectedPoint({ lat, lng });
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchScore({ lat, lng, subtype });
+        const data = await fetchScore({ lat, lng, subtype }, controller.signal);
+        if (requestRef.current.id !== requestId) return;
         setResult(data);
       } catch (err) {
-        setError(err.message);
+        if (err.name === "AbortError" || requestRef.current.id !== requestId) return;
+        setError({ message: err.message, type: err.type, resetAt: err.resetAt });
         setResult(null);
       } finally {
-        setLoading(false);
+        if (requestRef.current.id === requestId) setLoading(false);
       }
     },
     [subtype]
@@ -43,9 +51,12 @@ export default function App() {
         <h1 style={styles.title}>Omaha Restaurant Site Score</h1>
         <p style={styles.subtitle}>Douglas &amp; Sarpy counties, NE. Click the map to score a point.</p>
         <SubtypeSelector value={subtype} onChange={setSubtype} />
-        {loading && <p style={styles.status}>Scoring…</p>}
-        {error && <p style={styles.error}>{error}</p>}
-        {!loading && <ScoreCard result={result} />}
+        <ScoreCard
+          result={result}
+          error={error}
+          loading={loading}
+          onRetry={() => handlePointSelected(selectedPoint)}
+        />
       </aside>
     </div>
   );
@@ -76,13 +87,5 @@ const styles = {
     fontSize: 13,
     color: "#898781",
     margin: "0 0 16px",
-  },
-  status: {
-    fontSize: 13,
-    color: "#52514e",
-  },
-  error: {
-    fontSize: 13,
-    color: "#d03b3b",
   },
 };

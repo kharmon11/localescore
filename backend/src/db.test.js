@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 // db.js throws at import time if DATABASE_URL isn't set. Tests never make a
 // real connection (pool.query is always mocked below), so a dummy value is
-// fine -- it just needs to be set before db.js is evaluated, hence the
+// fine. It just needs to be set before db.js is evaluated, hence the
 // dynamic import after this assignment (a static `import` at the top of the
 // file would be hoisted ahead of this line).
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";

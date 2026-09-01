@@ -10,48 +10,32 @@ import { query } from "../db.js";
 const ORS_BASE_URL = "https://api.heigit.org/openrouteservice/v2/isochrones";
 
 /**
- * Returns a GeoJSON FeatureCollection of isochrone rings for a point,
- * checking isochrone_cache first before calling OpenRouteService/HeiGIT.
+ * Rounds lat/lng to ~11m precision (4 decimal places -- 1 decimal degree of
+ * latitude is ~111km, so 10^-4 degree is ~11m; 5 decimal places, used here
+ * previously, is ~1.1m). This lets two clicks within about 11m of each
+ * other share a cache entry, then folds in the travel profile so different
+ * subtypes at the same point don't collide.
  *
- * On a cache miss, a non-403 failure (bad gateway, dropped connection, or
- * ORS_REQUEST_TIMEOUT_MS elapsing with no response) is retried once after a
- * short delay before giving up; a 403 (quota exhausted) is never retried.
+ * In practice this gives almost no protection against the live ORS/HeiGIT
+ * quota: ordinary exploratory map clicks are rarely within 11m of each
+ * other, so nearly every click is a cache miss and costs a real API call.
+ * It also does nothing for scripts/compute-benchmarks.js's benchmark grid,
+ * whose sample points are ~1.7-2.2km apart -- confirmed 2026-08-25 while
+ * diagnosing a live quota-exhaustion outage. See
+ * project_click_quota_architecture_flaw.md (Claude's memory for this repo)
+ * for the full writeup; a caching/quota strategy overhaul is planned.
  *
- * @param {number} lat
- * @param {number} lng
- * @param {{mode: string, rangesMinutes: number[]}} isochroneProfile
- * @param {AbortSignal} [signal] aborts the ORS call if the client disconnects
- * @throws {OrsQuotaExceededError} if the account's daily ORS/HeiGIT quota is exhausted
- * @throws {OrsTransientError} if the request fails and the one retry also fails
+ * Exported so other callers that need to know (not fetch) whether a point is
+ * already cached -- e.g. scripts/compute-benchmarks.js checking whether a
+ * grid point/subtype combo would cost a new OpenRouteService call before
+ * deciding whether it's within this run's self-imposed budget -- can compute
+ * the same key without duplicating this rounding logic (and risking it
+ * silently drifting out of sync with the one getIsochrone() actually uses).
  */
-export async function getIsochrone(lat, lng, isochroneProfile, signal) {
-  const cacheKey = buildCacheKey(lat, lng, isochroneProfile);
-
-  const cached = await query(
-    `SELECT geojson FROM isochrone_cache WHERE cache_key = $1`,
-    [cacheKey]
-  );
-  if (cached.rows.length > 0) {
-    return cached.rows[0].geojson;
-  }
-
-  const geojson = await fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile, signal);
-
-  await query(
-    `INSERT INTO isochrone_cache (cache_key, lat, lng, travel_profile, ranges_minutes, geojson)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (cache_key) DO NOTHING`,
-    [
-      cacheKey,
-      lat,
-      lng,
-      isochroneProfile.mode,
-      isochroneProfile.rangesMinutes,
-      geojson,
-    ]
-  );
-
-  return geojson;
+export function buildCacheKey(lat, lng, { mode, rangesMinutes }) {
+  const roundedLat = lat.toFixed(4);
+  const roundedLng = lng.toFixed(4);
+  return `${roundedLat},${roundedLng},${mode},${rangesMinutes.join("-")}`;
 }
 
 // ORS/HeiGIT isochrone requests normally return in well under a second; this
@@ -161,30 +145,46 @@ async function fetchFromOpenRouteService(lat, lng, { mode, rangesMinutes }, sign
 }
 
 /**
- * Rounds lat/lng to ~11m precision (4 decimal places -- 1 decimal degree of
- * latitude is ~111km, so 10^-4 degree is ~11m; 5 decimal places, used here
- * previously, is ~1.1m). This lets two clicks within about 11m of each
- * other share a cache entry, then folds in the travel profile so different
- * subtypes at the same point don't collide.
+ * Returns a GeoJSON FeatureCollection of isochrone rings for a point,
+ * checking isochrone_cache first before calling OpenRouteService/HeiGIT.
  *
- * In practice this gives almost no protection against the live ORS/HeiGIT
- * quota: ordinary exploratory map clicks are rarely within 11m of each
- * other, so nearly every click is a cache miss and costs a real API call.
- * It also does nothing for scripts/compute-benchmarks.js's benchmark grid,
- * whose sample points are ~1.7-2.2km apart -- confirmed 2026-08-25 while
- * diagnosing a live quota-exhaustion outage. See
- * project_click_quota_architecture_flaw.md (Claude's memory for this repo)
- * for the full writeup; a caching/quota strategy overhaul is planned.
+ * On a cache miss, a non-403 failure (bad gateway, dropped connection, or
+ * ORS_REQUEST_TIMEOUT_MS elapsing with no response) is retried once after a
+ * short delay before giving up; a 403 (quota exhausted) is never retried.
  *
- * Exported so other callers that need to know (not fetch) whether a point is
- * already cached -- e.g. scripts/compute-benchmarks.js checking whether a
- * grid point/subtype combo would cost a new OpenRouteService call before
- * deciding whether it's within this run's self-imposed budget -- can compute
- * the same key without duplicating this rounding logic (and risking it
- * silently drifting out of sync with the one getIsochrone() actually uses).
+ * @param {number} lat
+ * @param {number} lng
+ * @param {{mode: string, rangesMinutes: number[]}} isochroneProfile
+ * @param {AbortSignal} [signal] aborts the ORS call if the client disconnects
+ * @throws {OrsQuotaExceededError} if the account's daily ORS/HeiGIT quota is exhausted
+ * @throws {OrsTransientError} if the request fails and the one retry also fails
  */
-export function buildCacheKey(lat, lng, { mode, rangesMinutes }) {
-  const roundedLat = lat.toFixed(4);
-  const roundedLng = lng.toFixed(4);
-  return `${roundedLat},${roundedLng},${mode},${rangesMinutes.join("-")}`;
+export async function getIsochrone(lat, lng, isochroneProfile, signal) {
+  const cacheKey = buildCacheKey(lat, lng, isochroneProfile);
+
+  const cached = await query(
+    `SELECT geojson FROM isochrone_cache WHERE cache_key = $1`,
+    [cacheKey]
+  );
+  if (cached.rows.length > 0) {
+    return cached.rows[0].geojson;
+  }
+
+  const geojson = await fetchFromOpenRouteServiceWithRetry(lat, lng, isochroneProfile, signal);
+
+  await query(
+    `INSERT INTO isochrone_cache (cache_key, lat, lng, travel_profile, ranges_minutes, geojson)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (cache_key) DO NOTHING`,
+    [
+      cacheKey,
+      lat,
+      lng,
+      isochroneProfile.mode,
+      isochroneProfile.rangesMinutes,
+      geojson,
+    ]
+  );
+
+  return geojson;
 }

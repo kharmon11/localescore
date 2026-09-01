@@ -3,6 +3,10 @@
  * See docs/design.md section 2.3 for the rationale behind each formula.
  */
 
+export function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 /**
  * Percentile-rank normalization: given a value and a sorted array of
  * reference values (e.g. the same metric computed at many sample points
@@ -44,8 +48,4 @@ export function saturationScore(localCompetitorsPer1000, citywideMedianCompetito
   }
   const ratio = localCompetitorsPer1000 / citywideMedianCompetitorsPer1000;
   return clamp(100 - Math.min(100, ratio * 50), 0, 100);
-}
-
-export function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
 }

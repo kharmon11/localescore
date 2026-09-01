@@ -12,72 +12,6 @@ const BAND_STYLES = {
   weak: { color: "#d03b3b", label: "Weak site" },
 };
 
-export default function ScoreCard({ result, error, loading, onRetry }) {
-  return <div style={styles.card}>{cardContent({ result, error, loading, onRetry })}</div>;
-}
-
-function cardContent({ result, error, loading, onRetry }) {
-  if (loading) {
-    return <p style={styles.status}>Scoring…</p>;
-  }
-
-  if (error) {
-    return (
-      <>
-        <p style={styles.error}>{formatErrorMessage(error)}</p>
-        {error.type === "transient" && (
-          <button type="button" style={styles.retryButton} onClick={onRetry}>
-            Try again
-          </button>
-        )}
-      </>
-    );
-  }
-
-  if (!result) {
-    return <p style={styles.placeholder}>Click a point on the map to score it.</p>;
-  }
-
-  const band = BAND_STYLES[result.band] ?? BAND_STYLES.marginal;
-
-  return (
-    <>
-      <div style={styles.heroRow}>
-        <span style={styles.hero}>{result.overall}</span>
-        <span style={{ ...styles.badge, color: band.color, borderColor: band.color }}>
-          <span style={{ ...styles.badgeDot, background: band.color }} />
-          {band.label}
-        </span>
-      </div>
-      {result.weightsOverridden && (
-        <p style={styles.overrideNote}>Custom weights applied (not the saved profile).</p>
-      )}
-      <SubscoreChart subscores={result.subscores} notes={result.notes} />
-    </>
-  );
-}
-
-// For a quota_exceeded error with a valid resetAt, build a message with the
-// actual time (and date, if it's not today) the user can try again,
-// computed in the browser's own local timezone, since the backend (running
-// on Cloud Run) can't know the viewer's timezone. Falls back to the
-// backend's own message for every other error, or if resetAt is missing.
-function formatErrorMessage(error) {
-  if (error.type === "quota_exceeded" && error.resetAt) {
-    const resetDate = new Date(error.resetAt);
-    if (!Number.isNaN(resetDate.getTime())) {
-      const now = new Date();
-      const time = resetDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-      if (resetDate.toDateString() === now.toDateString()) {
-        return `Openrouteservice data is temporarily unavailable. You can try again at ${time}.`;
-      }
-      const date = resetDate.toLocaleDateString([], { month: "short", day: "numeric" });
-      return `Openrouteservice data is temporarily unavailable. You can try again at ${time} on ${date}.`;
-    }
-  }
-  return error.message;
-}
-
 const styles = {
   card: {
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
@@ -147,3 +81,69 @@ const styles = {
     marginBottom: 10,
   },
 };
+
+// For a quota_exceeded error with a valid resetAt, build a message with the
+// actual time (and date, if it's not today) the user can try again,
+// computed in the browser's own local timezone, since the backend (running
+// on Cloud Run) can't know the viewer's timezone. Falls back to the
+// backend's own message for every other error, or if resetAt is missing.
+function formatErrorMessage(error) {
+  if (error.type === "quota_exceeded" && error.resetAt) {
+    const resetDate = new Date(error.resetAt);
+    if (!Number.isNaN(resetDate.getTime())) {
+      const now = new Date();
+      const time = resetDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      if (resetDate.toDateString() === now.toDateString()) {
+        return `Openrouteservice data is temporarily unavailable. You can try again at ${time}.`;
+      }
+      const date = resetDate.toLocaleDateString([], { month: "short", day: "numeric" });
+      return `Openrouteservice data is temporarily unavailable. You can try again at ${time} on ${date}.`;
+    }
+  }
+  return error.message;
+}
+
+function cardContent({ result, error, loading, onRetry }) {
+  if (loading) {
+    return <p style={styles.status}>Scoring…</p>;
+  }
+
+  if (error) {
+    return (
+      <>
+        <p style={styles.error}>{formatErrorMessage(error)}</p>
+        {error.type === "transient" && (
+          <button type="button" style={styles.retryButton} onClick={onRetry}>
+            Try again
+          </button>
+        )}
+      </>
+    );
+  }
+
+  if (!result) {
+    return <p style={styles.placeholder}>Click a point on the map to score it.</p>;
+  }
+
+  const band = BAND_STYLES[result.band] ?? BAND_STYLES.marginal;
+
+  return (
+    <>
+      <div style={styles.heroRow}>
+        <span style={styles.hero}>{result.overall}</span>
+        <span style={{ ...styles.badge, color: band.color, borderColor: band.color }}>
+          <span style={{ ...styles.badgeDot, background: band.color }} />
+          {band.label}
+        </span>
+      </div>
+      {result.weightsOverridden && (
+        <p style={styles.overrideNote}>Custom weights applied (not the saved profile).</p>
+      )}
+      <SubscoreChart subscores={result.subscores} notes={result.notes} />
+    </>
+  );
+}
+
+export default function ScoreCard({ result, error, loading, onRetry }) {
+  return <div style={styles.card}>{cardContent({ result, error, loading, onRetry })}</div>;
+}

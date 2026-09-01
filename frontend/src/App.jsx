@@ -4,6 +4,32 @@ import SubtypeSelector from "./components/SubtypeSelector.jsx";
 import ScoreCard from "./components/ScoreCard.jsx";
 import { fetchScore } from "./api/scoreClient.js";
 
+const styles = {
+  layout: {
+    display: "grid",
+    height: "100vh",
+    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+  },
+  mapPane: {
+    position: "relative",
+  },
+  sidebar: {
+    padding: 20,
+    overflowY: "auto",
+    background: "#f9f9f7",
+  },
+  title: {
+    fontSize: 18,
+    margin: "0 0 4px",
+    color: "#0b0b0b",
+  },
+  subtitle: {
+    fontSize: 13,
+    color: "#898781",
+    margin: "0 0 16px",
+  },
+};
+
 export default function App() {
   const [subtype, setSubtype] = useState("coffee_shop");
   const [selectedPoint, setSelectedPoint] = useState(null);
@@ -83,29 +109,3 @@ export default function App() {
     </div>
   );
 }
-
-const styles = {
-  layout: {
-    display: "grid",
-    height: "100vh",
-    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-  },
-  mapPane: {
-    position: "relative",
-  },
-  sidebar: {
-    padding: 20,
-    overflowY: "auto",
-    background: "#f9f9f7",
-  },
-  title: {
-    fontSize: 18,
-    margin: "0 0 4px",
-    color: "#0b0b0b",
-  },
-  subtitle: {
-    fontSize: 13,
-    color: "#898781",
-    margin: "0 0 16px",
-  },
-};

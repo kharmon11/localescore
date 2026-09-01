@@ -96,47 +96,6 @@ const COMPLEMENTARY_CATEGORY_WEIGHTS = {
 const COMPLEMENTARY_RADIUS_METERS = 400;
 
 /**
- * Computes all raw (pre-normalization) metrics the scoring engine needs for
- * one candidate point, given the isochrone GeoJSON already fetched for it.
- *
- * @param {number} lat
- * @param {number} lng
- * @param {object} isochroneGeoJSON - FeatureCollection from services/isochrone.js,
- *   expected to have one feature per range value in isochroneProfile.rangesMinutes,
- *   sorted ascending, each polygon cumulative (ORS's default behavior).
- * @param {string[]} competitorCategoryPatterns - Overture `category_primary`
- *   values (or SQL LIKE patterns, e.g. '%_restaurant') counted as direct
- *   competition for this subtype, e.g. ['coffee_shop', 'coffee_roastery', 'cafe']
- * @param {{primaryRingWeight: number, secondaryRingWeight: number}} ringWeights
- */
-export async function computeRawMetrics(lat, lng, isochroneGeoJSON, competitorCategoryPatterns, ringWeights) {
-  const { primaryRingGeoJSON, outerRingGeoJSON } = splitRings(isochroneGeoJSON);
-
-  const [demandAndGrowth, complementaryWeightedCount, accessibilityRaw] = await Promise.all([
-    computeDemandAndGrowth(primaryRingGeoJSON, outerRingGeoJSON, ringWeights),
-    computeComplementaryDraw(lat, lng),
-    computeAccessibility(lat, lng),
-  ]);
-
-  // Runs after (not alongside) computeDemandAndGrowth because it reuses that
-  // query's trade-area population instead of re-deriving it -- see the note
-  // on computeCompetitorsPer1000 below.
-  const { tradeAreaPopulation, ...demandMetrics } = demandAndGrowth;
-  const competitorsPer1000 = await computeCompetitorsPer1000(
-    outerRingGeoJSON,
-    competitorCategoryPatterns,
-    tradeAreaPopulation
-  );
-
-  return {
-    ...demandMetrics,
-    competitorsPer1000,
-    complementaryWeightedCount,
-    accessibilityRaw,
-  };
-}
-
-/**
  * ORS returns cumulative isochrones per range value (range[1]'s polygon
  * contains range[0]'s polygon), but doesn't strictly guarantee array order,
  * so sort by range value first. Returns the smallest ("primary") ring and
@@ -264,6 +223,18 @@ async function computeCompetitorsPer1000(outerRingGeoJSON, categoryPatterns, tra
   return (Number(rows[0].competitor_count) / tradeAreaPopulation) * 1000;
 }
 
+function weightForCategory(categoryPrimary) {
+  if (!categoryPrimary) return 0;
+  // Restaurant subtypes (mexican_restaurant, thai_restaurant, ...) all share
+  // the "<cuisine>_restaurant" suffix convention (or the bare "restaurant"
+  // leaf) -- see the taxonomy note above COMPLEMENTARY_CATEGORY_WEIGHTS for
+  // why these are matched by suffix instead of listed individually.
+  if (categoryPrimary === "restaurant" || categoryPrimary.endsWith("_restaurant")) {
+    return COMPLEMENTARY_CATEGORY_WEIGHTS.cafe; // same "other food/drink" weight
+  }
+  return COMPLEMENTARY_CATEGORY_WEIGHTS[categoryPrimary] ?? 0;
+}
+
 async function computeComplementaryDraw(lat, lng) {
   // Deliberately simple: fetch category_primary for every POI within the
   // radius, then apply the category-weight table in plain JS. A single
@@ -289,14 +260,43 @@ async function computeComplementaryDraw(lat, lng) {
   }, 0);
 }
 
-function weightForCategory(categoryPrimary) {
-  if (!categoryPrimary) return 0;
-  // Restaurant subtypes (mexican_restaurant, thai_restaurant, ...) all share
-  // the "<cuisine>_restaurant" suffix convention (or the bare "restaurant"
-  // leaf) -- see the taxonomy note above COMPLEMENTARY_CATEGORY_WEIGHTS for
-  // why these are matched by suffix instead of listed individually.
-  if (categoryPrimary === "restaurant" || categoryPrimary.endsWith("_restaurant")) {
-    return COMPLEMENTARY_CATEGORY_WEIGHTS.cafe; // same "other food/drink" weight
-  }
-  return COMPLEMENTARY_CATEGORY_WEIGHTS[categoryPrimary] ?? 0;
+/**
+ * Computes all raw (pre-normalization) metrics the scoring engine needs for
+ * one candidate point, given the isochrone GeoJSON already fetched for it.
+ *
+ * @param {number} lat
+ * @param {number} lng
+ * @param {object} isochroneGeoJSON - FeatureCollection from services/isochrone.js,
+ *   expected to have one feature per range value in isochroneProfile.rangesMinutes,
+ *   sorted ascending, each polygon cumulative (ORS's default behavior).
+ * @param {string[]} competitorCategoryPatterns - Overture `category_primary`
+ *   values (or SQL LIKE patterns, e.g. '%_restaurant') counted as direct
+ *   competition for this subtype, e.g. ['coffee_shop', 'coffee_roastery', 'cafe']
+ * @param {{primaryRingWeight: number, secondaryRingWeight: number}} ringWeights
+ */
+export async function computeRawMetrics(lat, lng, isochroneGeoJSON, competitorCategoryPatterns, ringWeights) {
+  const { primaryRingGeoJSON, outerRingGeoJSON } = splitRings(isochroneGeoJSON);
+
+  const [demandAndGrowth, complementaryWeightedCount, accessibilityRaw] = await Promise.all([
+    computeDemandAndGrowth(primaryRingGeoJSON, outerRingGeoJSON, ringWeights),
+    computeComplementaryDraw(lat, lng),
+    computeAccessibility(lat, lng),
+  ]);
+
+  // Runs after (not alongside) computeDemandAndGrowth because it reuses that
+  // query's trade-area population instead of re-deriving it -- see the note
+  // on computeCompetitorsPer1000 below.
+  const { tradeAreaPopulation, ...demandMetrics } = demandAndGrowth;
+  const competitorsPer1000 = await computeCompetitorsPer1000(
+    outerRingGeoJSON,
+    competitorCategoryPatterns,
+    tradeAreaPopulation
+  );
+
+  return {
+    ...demandMetrics,
+    competitorsPer1000,
+    complementaryWeightedCount,
+    accessibilityRaw,
+  };
 }

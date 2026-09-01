@@ -8,6 +8,8 @@ import { query } from "../db.js";
  * @param {string} subtype - 'coffee_shop' | 'fast_casual' | 'dinner_destination'
  * @param {object} [weightsOverride] - partial or full weights object from the request body
  */
+export class NotFoundError extends Error {}
+
 export async function loadScoringProfile(subtype, weightsOverride) {
   const { rows } = await query(
     `SELECT subtype, version, weights, normalization_params, isochrone_profile
@@ -37,5 +39,3 @@ export async function loadScoringProfile(subtype, weightsOverride) {
     isOverridden: Boolean(weightsOverride),
   };
 }
-
-export class NotFoundError extends Error {}

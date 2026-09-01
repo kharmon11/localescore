@@ -4,6 +4,27 @@ const SUBTYPES = [
   { value: "dinner_destination", label: "Sit-down / dinner destination" },
 ];
 
+const styles = {
+  wrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+  },
+  label: {
+    fontSize: 12,
+    color: "#52514e",
+  },
+  select: {
+    fontSize: 14,
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid #e1e0d9",
+    background: "#fcfcfb",
+    color: "#0b0b0b",
+  },
+};
+
 export default function SubtypeSelector({ value, onChange }) {
   return (
     <div style={styles.wrap}>
@@ -25,24 +46,3 @@ export default function SubtypeSelector({ value, onChange }) {
     </div>
   );
 }
-
-const styles = {
-  wrap: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-  },
-  label: {
-    fontSize: 12,
-    color: "#52514e",
-  },
-  select: {
-    fontSize: 14,
-    padding: "6px 8px",
-    borderRadius: 6,
-    border: "1px solid #e1e0d9",
-    background: "#fcfcfb",
-    color: "#0b0b0b",
-  },
-};

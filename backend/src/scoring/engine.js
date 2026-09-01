@@ -17,6 +17,18 @@ import { percentileRank, saturationScore, clamp } from "./normalize.js";
  *
  * @returns {{overall: number, band: string, subscores: object}}
  */
+/** Bands from docs/design.md section 2.4. */
+export function scoreBand(overall) {
+  if (overall >= 80) return "strong";
+  if (overall >= 60) return "good";
+  if (overall >= 40) return "marginal";
+  return "weak";
+}
+
+function mapValues(obj, fn) {
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fn(v)]));
+}
+
 export function computeScore(rawMetrics, profile) {
   const { weights, normalizationParams } = profile;
 
@@ -65,16 +77,4 @@ export function computeScore(rawMetrics, profile) {
     band: scoreBand(overall),
     subscores: mapValues(subscores, (v) => Math.round(v * 10) / 10),
   };
-}
-
-/** Bands from docs/design.md section 2.4. */
-export function scoreBand(overall) {
-  if (overall >= 80) return "strong";
-  if (overall >= 60) return "good";
-  if (overall >= 40) return "marginal";
-  return "weak";
-}
-
-function mapValues(obj, fn) {
-  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fn(v)]));
 }

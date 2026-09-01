@@ -38,7 +38,29 @@ export default function App() {
   );
 
   return (
-    <div style={styles.layout}>
+    <div className="app-layout" style={styles.layout}>
+      {/* grid-template-columns/rows and the sidebar's border live here, not in
+          the inline `styles` objects below -- an inline `style` prop always
+          wins over any stylesheet rule for the same property, media query or
+          not, so the responsive override couldn't take effect otherwise. */}
+      <style>{`
+        .app-layout {
+          grid-template-columns: 1fr 380px;
+        }
+        .app-sidebar {
+          border-left: 1px solid #e1e0d9;
+        }
+        @media (max-width: 768px) {
+          .app-layout {
+            grid-template-columns: 1fr;
+            grid-template-rows: 45vh 1fr;
+          }
+          .app-sidebar {
+            border-left: none;
+            border-top: 1px solid #e1e0d9;
+          }
+        }
+      `}</style>
       <div style={styles.mapPane}>
         <MapView
           subtype={subtype}
@@ -47,7 +69,7 @@ export default function App() {
           selectedPoint={selectedPoint}
         />
       </div>
-      <aside style={styles.sidebar}>
+      <aside className="app-sidebar" style={styles.sidebar}>
         <h1 style={styles.title}>Omaha Restaurant Site Score</h1>
         <p style={styles.subtitle}>Douglas &amp; Sarpy counties, NE. Click the map to score a point.</p>
         <SubtypeSelector value={subtype} onChange={setSubtype} />
@@ -65,7 +87,6 @@ export default function App() {
 const styles = {
   layout: {
     display: "grid",
-    gridTemplateColumns: "1fr 380px",
     height: "100vh",
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   },
@@ -75,7 +96,6 @@ const styles = {
   sidebar: {
     padding: 20,
     overflowY: "auto",
-    borderLeft: "1px solid #e1e0d9",
     background: "#f9f9f7",
   },
   title: {

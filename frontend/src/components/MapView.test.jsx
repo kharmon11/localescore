@@ -1,7 +1,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-vi.mock("react-map-gl", () => ({
+vi.mock("react-map-gl/mapbox", () => ({
   default: ({ children, onClick }) => (
     <div data-testid="mock-map" onClick={() => onClick({ lngLat: { lat: 41.5, lng: -96.5 } })}>
       {children}

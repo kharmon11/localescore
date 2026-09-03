@@ -1,18 +1,23 @@
-import SubscoreChart from "./SubscoreChart.jsx";
+import type { CSSProperties } from "react";
+import SubscoreChart from "./SubscoreChart";
+import type { ScoreResponse, Band, ScoreErrorType } from "../api/scoreClient";
 
 // The four score bands (docs/design.md 2.4) are a quality/severity scale, so
 // they're mapped onto the dataviz skill's fixed status palette rather than
 // an arbitrary color choice. Because "warning" and "serious" sit below 3:1
 // contrast on a light surface by design, every badge pairs the color with a
-// visible text label -- never color alone.
-const BAND_STYLES = {
+// visible text label, never color alone.
+//
+// Typed as Record<Band, ...> so a missing or mistyped band is a compile
+// error here, the same reasoning as SubscoreChart's SUBSCORE_LABELS.
+const BAND_STYLES: Record<Band, { color: string; label: string }> = {
   strong: { color: "#0ca30c", label: "Strong site" },
   good: { color: "#fab219", label: "Good site" },
   marginal: { color: "#ec835a", label: "Marginal site" },
   weak: { color: "#d03b3b", label: "Weak site" },
 };
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   card: {
     fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     background: "#fcfcfb",
@@ -82,12 +87,22 @@ const styles = {
   },
 };
 
+// App.jsx constructs this as a plain object from a caught error
+// ({ message: err.message, type: err.type, resetAt: err.resetAt }), not a
+// real ScoreError instance, so this is its own plain shape rather than
+// importing the ScoreError class type.
+export interface ScoreCardErrorInfo {
+  message: string;
+  type?: ScoreErrorType;
+  resetAt?: string | null;
+}
+
 // For a quota_exceeded error with a valid resetAt, build a message with the
 // actual time (and date, if it's not today) the user can try again,
 // computed in the browser's own local timezone, since the backend (running
 // on Cloud Run) can't know the viewer's timezone. Falls back to the
 // backend's own message for every other error, or if resetAt is missing.
-function formatErrorMessage(error) {
+function formatErrorMessage(error: ScoreCardErrorInfo): string {
   if (error.type === "quota_exceeded" && error.resetAt) {
     const resetDate = new Date(error.resetAt);
     if (!Number.isNaN(resetDate.getTime())) {
@@ -103,7 +118,14 @@ function formatErrorMessage(error) {
   return error.message;
 }
 
-function cardContent({ result, error, loading, onRetry }) {
+interface CardContentProps {
+  result: ScoreResponse | null;
+  error: ScoreCardErrorInfo | null;
+  loading: boolean;
+  onRetry: () => void;
+}
+
+function cardContent({ result, error, loading, onRetry }: CardContentProps) {
   if (loading) {
     return <p style={styles.status}>Scoring…</p>;
   }
@@ -144,6 +166,6 @@ function cardContent({ result, error, loading, onRetry }) {
   );
 }
 
-export default function ScoreCard({ result, error, loading, onRetry }) {
+export default function ScoreCard({ result, error, loading, onRetry }: CardContentProps) {
   return <div style={styles.card}>{cardContent({ result, error, loading, onRetry })}</div>;
 }

@@ -1,6 +1,10 @@
 import { useCallback, useState } from "react";
+import type { CSSProperties } from "react";
 import Map, { Source, Layer, Marker } from "react-map-gl/mapbox";
+import type { LayerProps } from "react-map-gl/mapbox";
+import type { MapMouseEvent } from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
+import type { Subtype } from "./SubtypeSelector";
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -11,12 +15,12 @@ const INITIAL_VIEW_STATE = {
   zoom: 10.5,
 };
 
-const isochroneFillLayer = {
+const isochroneFillLayer: LayerProps = {
   id: "isochrone-fill",
   type: "fill",
   paint: {
     // Data-driven by the ORS range `value` property (seconds): the smaller
-    // (primary) ring reads darker/more opaque, the outer ring lighter --
+    // (primary) ring reads darker/more opaque, the outer ring lighter,
     // same single hue throughout, since this is one measure (reachability),
     // not multiple categories.
     "fill-color": "#2a78d6",
@@ -24,7 +28,7 @@ const isochroneFillLayer = {
   },
 };
 
-const isochroneLineLayer = {
+const isochroneLineLayer: LayerProps = {
   id: "isochrone-line",
   type: "line",
   paint: {
@@ -33,7 +37,7 @@ const isochroneLineLayer = {
   },
 };
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   missingToken: {
     display: "flex",
     alignItems: "center",
@@ -47,11 +51,23 @@ const styles = {
   },
 };
 
-export default function MapView({ subtype, onPointSelected, isochroneGeoJSON, selectedPoint }) {
+export interface MapPoint {
+  lat: number;
+  lng: number;
+}
+
+interface MapViewProps {
+  subtype: Subtype;
+  onPointSelected: (point: MapPoint) => void;
+  isochroneGeoJSON: unknown;
+  selectedPoint: MapPoint | null;
+}
+
+export default function MapView({ onPointSelected, isochroneGeoJSON, selectedPoint }: MapViewProps) {
   const [cursor, setCursor] = useState("auto");
 
   const handleClick = useCallback(
-    (event) => {
+    (event: MapMouseEvent) => {
       const { lng, lat } = event.lngLat;
       onPointSelected({ lat, lng });
     },
@@ -76,8 +92,8 @@ export default function MapView({ subtype, onPointSelected, isochroneGeoJSON, se
       onMouseEnter={() => setCursor("crosshair")}
       onClick={handleClick}
     >
-      {isochroneGeoJSON && (
-        <Source id="isochrone" type="geojson" data={isochroneGeoJSON}>
+      {isochroneGeoJSON != null && (
+        <Source id="isochrone" type="geojson" data={isochroneGeoJSON as GeoJSON.GeoJSON}>
           <Layer {...isochroneFillLayer} />
           <Layer {...isochroneLineLayer} />
         </Source>

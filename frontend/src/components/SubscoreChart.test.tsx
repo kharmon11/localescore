@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import SubscoreChart from "./SubscoreChart.jsx";
+import SubscoreChart from "./SubscoreChart";
 
 const FULL_SUBSCORES = {
   demandDensity: 70,
@@ -25,15 +25,15 @@ test("defaults missing subscores to 0 and shows no note markers", () => {
 
 test("shows a note marker only for keys with a note", () => {
   render(<SubscoreChart subscores={FULL_SUBSCORES} notes={{ growthTrend: "Approximate trend note" }} />);
-  const growthRow = screen.getByText("Growth trend").closest(".subscore-row");
+  const growthRow = screen.getByText("Growth trend").closest(".subscore-row")!;
   expect(growthRow.querySelector(".subscore-note-marker")).toBeInTheDocument();
-  const demandRow = screen.getByText("Demand density").closest(".subscore-row");
+  const demandRow = screen.getByText("Demand density").closest(".subscore-row")!;
   expect(demandRow.querySelector(".subscore-note-marker")).not.toBeInTheDocument();
 });
 
 test("shows a tooltip with the value and note on hover, and hides it on mouse leave", () => {
   render(<SubscoreChart subscores={FULL_SUBSCORES} notes={{ growthTrend: "Approximate trend note" }} />);
-  const growthRow = screen.getByText("Growth trend").closest(".subscore-row");
+  const growthRow = screen.getByText("Growth trend").closest(".subscore-row")!;
   expect(growthRow.querySelector(".subscore-tooltip")).not.toBeInTheDocument();
 
   fireEvent.mouseEnter(growthRow);
@@ -46,6 +46,6 @@ test("shows a tooltip with the value and note on hover, and hides it on mouse le
 test("clamps the bar width to 0-100 but displays the raw value", () => {
   render(<SubscoreChart subscores={{ ...FULL_SUBSCORES, demandDensity: 140 }} notes={{}} />);
   expect(screen.getByText("140")).toBeInTheDocument();
-  const demandRow = screen.getByText("Demand density").closest(".subscore-row");
-  expect(demandRow.querySelector(".subscore-bar").style.width).toBe("100%");
+  const demandRow = screen.getByText("Demand density").closest(".subscore-row")!;
+  expect((demandRow.querySelector(".subscore-bar") as HTMLElement).style.width).toBe("100%");
 });

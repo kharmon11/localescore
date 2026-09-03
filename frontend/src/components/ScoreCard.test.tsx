@@ -1,6 +1,6 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import ScoreCard from "./ScoreCard.jsx";
+import ScoreCard from "./ScoreCard";
 
 const FULL_SUBSCORES = {
   demandDensity: 70,
@@ -102,10 +102,13 @@ test("shows the raw message with no retry button for an untyped error", () => {
 test("shows the score, band, and subscores when a result is present", () => {
   const result = {
     overall: 62.3,
-    band: "good",
+    band: "good" as const,
+    subtype: "coffee_shop",
+    profileVersion: 1,
     weightsOverridden: false,
     subscores: FULL_SUBSCORES,
-    notes: {},
+    isochrone: null,
+    notes: { growthTrend: "" },
   };
   render(<ScoreCard result={result} error={null} loading={false} onRetry={() => {}} />);
   expect(screen.getByText("62.3")).toBeInTheDocument();
@@ -116,10 +119,13 @@ test("shows the score, band, and subscores when a result is present", () => {
 test("shows the weightsOverridden note when set", () => {
   const result = {
     overall: 50,
-    band: "marginal",
+    band: "marginal" as const,
+    subtype: "coffee_shop",
+    profileVersion: 1,
     weightsOverridden: true,
     subscores: FULL_SUBSCORES,
-    notes: {},
+    isochrone: null,
+    notes: { growthTrend: "" },
   };
   render(<ScoreCard result={result} error={null} loading={false} onRetry={() => {}} />);
   expect(screen.getByText("Custom weights applied (not the saved profile).")).toBeInTheDocument();

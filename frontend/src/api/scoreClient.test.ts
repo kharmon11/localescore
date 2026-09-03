@@ -1,7 +1,7 @@
 import { test, expect, vi, afterEach } from "vitest";
-import { fetchScore } from "./scoreClient.js";
+import { fetchScore } from "./scoreClient";
 
-function jsonResponse(status, body) {
+function jsonResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -79,9 +79,12 @@ test("fetchScore rethrows an AbortError unchanged", async () => {
 });
 
 test("fetchScore forwards the given signal to fetch()", async () => {
-  const fetchMock = vi.fn(async () => jsonResponse(200, {}));
+  // Typed with fetch's own (url, init) signature so mock.calls[0][1] is
+  // known to exist, rather than the zero-arg signature a bare
+  // `vi.fn(async () => ...)` would otherwise infer.
+  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse(200, {}));
   vi.stubGlobal("fetch", fetchMock);
   const controller = new AbortController();
   await fetchScore({ lat: 1, lng: 2, subtype: "coffee_shop" }, controller.signal);
-  expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+  expect(fetchMock.mock.calls[0][1]?.signal).toBe(controller.signal);
 });

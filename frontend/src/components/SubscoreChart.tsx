@@ -1,19 +1,22 @@
 import { useState } from "react";
+import type { ScoreSubscores } from "../api/scoreClient";
 
 /**
  * Horizontal bar chart for the five sub-scores returned by POST /score.
  *
  * Chart-type choice (per the project's dataviz skill): the sub-scores are
- * five *named, nominal* dimensions of magnitude for a single candidate site
- * -- not distinct series to tell apart and not a polarity -- so this is a
+ * five *named, nominal* dimensions of magnitude for a single candidate site,
+ * not distinct series to tell apart and not a polarity, so this is a
  * "compare magnitude" job. That maps to a bar chart with one sequential hue,
  * NOT a radar/spider chart (radar charts distort area and make magnitude
  * harder to compare accurately) and NOT one color per bar (nominal
- * categories don't get colored by their own value -- that spends the
+ * categories don't get colored by their own value: that spends the
  * identity channel re-encoding what the bar length already shows).
  */
 
-const SUBSCORE_LABELS = {
+// Typed against ScoreSubscores so a mismatch (a renamed or added sub-score)
+// is a compile error here, not a silently-missing row.
+const SUBSCORE_LABELS: Record<keyof ScoreSubscores, string> = {
   demandDensity: "Demand density",
   competitiveSaturation: "Competitive saturation",
   complementaryDraw: "Complementary draw",
@@ -21,7 +24,7 @@ const SUBSCORE_LABELS = {
   growthTrend: "Growth trend",
 };
 
-const SUBSCORE_ORDER = [
+const SUBSCORE_ORDER: (keyof ScoreSubscores)[] = [
   "demandDensity",
   "competitiveSaturation",
   "complementaryDraw",
@@ -29,8 +32,13 @@ const SUBSCORE_ORDER = [
   "growthTrend",
 ];
 
-export default function SubscoreChart({ subscores, notes }) {
-  const [hovered, setHovered] = useState(null);
+interface SubscoreChartProps {
+  subscores?: ScoreSubscores;
+  notes?: Partial<Record<keyof ScoreSubscores, string>>;
+}
+
+export default function SubscoreChart({ subscores, notes }: SubscoreChartProps) {
+  const [hovered, setHovered] = useState<keyof ScoreSubscores | null>(null);
 
   return (
     <div className="viz-root subscore-chart">

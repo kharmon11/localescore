@@ -1,10 +1,16 @@
+import type { CSSProperties } from "react";
+
 const SUBTYPES = [
   { value: "coffee_shop", label: "Coffee shop / cafe" },
   { value: "fast_casual", label: "Fast casual / QSR" },
   { value: "dinner_destination", label: "Sit-down / dinner destination" },
-];
+] as const;
 
-const styles = {
+// Derived from SUBTYPES (the one canonical list) rather than hand-written,
+// same "avoid a second, drift-prone copy" reasoning as the backend's Subtype.
+export type Subtype = (typeof SUBTYPES)[number]["value"];
+
+const styles: Record<string, CSSProperties> = {
   wrap: {
     display: "flex",
     flexDirection: "column",
@@ -25,7 +31,12 @@ const styles = {
   },
 };
 
-export default function SubtypeSelector({ value, onChange }) {
+interface SubtypeSelectorProps {
+  value: Subtype;
+  onChange: (value: Subtype) => void;
+}
+
+export default function SubtypeSelector({ value, onChange }: SubtypeSelectorProps) {
   return (
     <div style={styles.wrap}>
       <label style={styles.label} htmlFor="subtype-select">
@@ -34,7 +45,10 @@ export default function SubtypeSelector({ value, onChange }) {
       <select
         id="subtype-select"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        // The DOM only knows e.target.value is a string; this app is the one
+        // that knows it can only ever be one of the three <option> values
+        // below, same reasoning as the backend's post-validation subtype casts.
+        onChange={(e) => onChange(e.target.value as Subtype)}
         style={styles.select}
       >
         {SUBTYPES.map((s) => (

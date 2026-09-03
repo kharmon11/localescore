@@ -1,10 +1,15 @@
 import { useState, useCallback, useRef } from "react";
-import MapView from "./components/MapView.jsx";
-import SubtypeSelector from "./components/SubtypeSelector.jsx";
-import ScoreCard from "./components/ScoreCard.jsx";
-import { fetchScore } from "./api/scoreClient.js";
+import type { CSSProperties } from "react";
+import MapView from "./components/MapView";
+import type { MapPoint } from "./components/MapView";
+import SubtypeSelector from "./components/SubtypeSelector";
+import type { Subtype } from "./components/SubtypeSelector";
+import ScoreCard from "./components/ScoreCard";
+import type { ScoreCardErrorInfo } from "./components/ScoreCard";
+import { fetchScore, ScoreError } from "./api/scoreClient";
+import type { ScoreResponse } from "./api/scoreClient";
 
-const styles = {
+const styles: Record<string, CSSProperties> = {
   layout: {
     display: "grid",
     height: "100vh",
@@ -31,15 +36,15 @@ const styles = {
 };
 
 export default function App() {
-  const [subtype, setSubtype] = useState("coffee_shop");
-  const [selectedPoint, setSelectedPoint] = useState(null);
-  const [result, setResult] = useState(null);
+  const [subtype, setSubtype] = useState<Subtype>("coffee_shop");
+  const [selectedPoint, setSelectedPoint] = useState<MapPoint | null>(null);
+  const [result, setResult] = useState<ScoreResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const requestRef = useRef({ id: 0, controller: null });
+  const [error, setError] = useState<ScoreCardErrorInfo | null>(null);
+  const requestRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
 
   const handlePointSelected = useCallback(
-    async ({ lat, lng }) => {
+    async ({ lat, lng }: MapPoint) => {
       requestRef.current.controller?.abort();
       const requestId = ++requestRef.current.id;
       const controller = new AbortController();
@@ -53,8 +58,16 @@ export default function App() {
         if (requestRef.current.id !== requestId) return;
         setResult(data);
       } catch (err) {
-        if (err.name === "AbortError" || requestRef.current.id !== requestId) return;
-        setError({ message: err.message, type: err.type, resetAt: err.resetAt });
+        // A real abort throws a DOMException, which does NOT extend Error
+        // in the prototype chain (same reasoning as scoreClient.ts's own
+        // abort check), so this checks for a "name" property duck-type
+        // style rather than `err instanceof Error`.
+        const isAbort = err !== null && typeof err === "object" && "name" in err && err.name === "AbortError";
+        if (isAbort || requestRef.current.id !== requestId) return;
+        const message = err instanceof Error ? err.message : String(err);
+        const type = err instanceof ScoreError ? err.type : undefined;
+        const resetAt = err instanceof ScoreError ? err.resetAt : undefined;
+        setError({ message, type, resetAt });
         setResult(null);
       } finally {
         if (requestRef.current.id === requestId) setLoading(false);
@@ -66,7 +79,7 @@ export default function App() {
   return (
     <div className="app-layout" style={styles.layout}>
       {/* grid-template-columns/rows and the sidebar's border live here, not in
-          the inline `styles` objects below -- an inline `style` prop always
+          the inline `styles` objects below: an inline `style` prop always
           wins over any stylesheet rule for the same property, media query or
           not, so the responsive override couldn't take effect otherwise. */}
       <style>{`
@@ -103,7 +116,7 @@ export default function App() {
           result={result}
           error={error}
           loading={loading}
-          onRetry={() => handlePointSelected(selectedPoint)}
+          onRetry={() => selectedPoint && handlePointSelected(selectedPoint)}
         />
       </aside>
     </div>

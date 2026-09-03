@@ -1,6 +1,6 @@
 import { test, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import SubtypeSelector from "./SubtypeSelector.jsx";
+import SubtypeSelector from "./SubtypeSelector";
 
 test("renders all three subtype options with their labels", () => {
   render(<SubtypeSelector value="coffee_shop" onChange={() => {}} />);
@@ -11,7 +11,7 @@ test("renders all three subtype options with their labels", () => {
 
 test("reflects the given value as selected", () => {
   render(<SubtypeSelector value="fast_casual" onChange={() => {}} />);
-  expect(screen.getByLabelText("Concept").value).toBe("fast_casual");
+  expect((screen.getByLabelText("Concept") as HTMLSelectElement).value).toBe("fast_casual");
 });
 
 test("calls onChange with the new value when changed", () => {

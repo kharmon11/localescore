@@ -24,6 +24,23 @@ const SUBSCORE_LABELS: Record<keyof ScoreSubscores, string> = {
   growthTrend: "Growth trend",
 };
 
+// Static methodology text, always shown in the tooltip regardless of
+// per-request data (contrast with `notes`, which is backend-computed and
+// only ever populated for growthTrend today; see routes/score.ts's
+// growthTrendNote).
+const SUBSCORE_DESCRIPTIONS: Record<keyof ScoreSubscores, string> = {
+  demandDensity:
+    "Estimates how many people live within the site's trade area, weighting the tighter primary ring (e.g. the 5- or 10-minute isochrone) more heavily than the wider secondary ring, using Census block-group population data intersected with the isochrone shape. That weighted population is then compared against a citywide sample of points across Douglas and Sarpy counties, and the score is the percentile it falls at: 75 means this site's trade-area population is higher than about 75% of sampled locations, not an absolute headcount.",
+  competitiveSaturation:
+    "Counts existing competitors of the same subtype within the site's full trade area, converts that to a rate per 1,000 residents, and compares it to the citywide median rate for that subtype. This is a penalty, not a percentile. A site with the same or fewer competitors per capita than the median scores near or above 100, and the score drops as the local rate climbs above the median, reaching 0 once it's roughly double the citywide median.",
+  complementaryDraw:
+    "Counts nearby businesses within a short walk (400m) that tend to generate foot traffic without competing directly, such as offices, grocery stores, gyms, schools, hotels, entertainment venues, and other cafes and bars, and sums them with weights reflecting how much each type tends to draw (offices and grocery score highest, other food/drink venues lowest). That weighted total is then compared against a citywide sample of points, and the score is this site's percentile in that distribution.",
+  accessibilityVisibility:
+    "Combines two signals: the classification of the nearest road (major arterial roads score highest, quiet residential streets and footpaths score lowest, based on official road-class data), weighted 75%, and the number of transit stops, train or bus stations, within a short walk, weighted 25%. Unlike the other four sub-scores, this one isn't ranked against other points citywide. It's an absolute 0 to 100 score based only on this site's own surroundings.",
+  growthTrend:
+    "Compares the trade area's population across two Census 5-year estimate periods (the most recent available vs. roughly five years prior) to estimate whether the area is gaining or losing population, then ranks that growth rate against a citywide sample of points. This is an approximate multi-year trend, not a true year-over-year rate, since Census block groups don't get 1-year estimates.",
+};
+
 const SUBSCORE_ORDER: (keyof ScoreSubscores)[] = [
   "demandDensity",
   "competitiveSaturation",
@@ -94,26 +111,25 @@ export default function SubscoreChart({ subscores, notes }: SubscoreChartProps) 
         }
         .subscore-tooltip {
           position: absolute;
-          left: 0;
-          top: -26px;
-          background: var(--text-primary);
-          color: var(--surface-1);
-          font-size: 12px;
-          padding: 3px 8px;
-          border-radius: 4px;
-          pointer-events: none;
-          white-space: nowrap;
-          z-index: 1;
-        }
-        .subscore-tooltip.has-note {
-          left: auto;
           right: 0;
           top: auto;
           bottom: -8px;
           transform: translateY(100%);
+          background: var(--text-primary);
+          color: var(--surface-1);
+          font-size: 12px;
+          padding: 6px 10px;
+          border-radius: 4px;
+          pointer-events: none;
           white-space: normal;
-          width: 240px;
+          width: 300px;
           line-height: 1.4;
+          z-index: 1;
+        }
+        .subscore-tooltip-note {
+          margin-top: 6px;
+          padding-top: 6px;
+          border-top: 1px solid rgba(255, 255, 255, 0.25);
         }
         .subscore-note-marker {
           color: var(--text-muted);
@@ -137,18 +153,15 @@ export default function SubscoreChart({ subscores, notes }: SubscoreChartProps) 
           >
             <span className="subscore-label">
               {SUBSCORE_LABELS[key]}
-              {note && (
-                <span className="subscore-note-marker" title={note}>
-                  ⓘ
-                </span>
-              )}
+              <span className="subscore-note-marker">ⓘ</span>
             </span>
             <div className="subscore-track">
               <div className="subscore-bar" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
               {hovered === key && (
-                <div className={`subscore-tooltip${note ? " has-note" : ""}`}>
+                <div className="subscore-tooltip">
                   {SUBSCORE_LABELS[key]}: <strong>{value}</strong>
-                  {note && <div>{note}</div>}
+                  <div>{SUBSCORE_DESCRIPTIONS[key]}</div>
+                  {note && <div className="subscore-tooltip-note">{note}</div>}
                 </div>
               )}
             </div>

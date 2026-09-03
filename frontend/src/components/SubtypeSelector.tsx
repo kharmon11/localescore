@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 // Descriptions summarize docs/design.md 2.1 and 2.2 (trade-area radius,
 // travel mode, and what each subtype's weights emphasize) at UI length
 // rather than doc length.
-const SUBTYPES = [
+export const SUBTYPES = [
   {
     value: "coffee_shop",
     label: "Coffee shop / cafe",

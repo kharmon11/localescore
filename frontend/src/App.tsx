@@ -6,6 +6,7 @@ import SubtypeSelector from "./components/SubtypeSelector";
 import type { Subtype } from "./components/SubtypeSelector";
 import ScoreCard from "./components/ScoreCard";
 import type { ScoreCardErrorInfo } from "./components/ScoreCard";
+import AboutModal from "./components/AboutModal";
 import { fetchScore, ScoreError } from "./api/scoreClient";
 import type { ScoreResponse } from "./api/scoreClient";
 
@@ -31,7 +32,21 @@ const styles: Record<string, CSSProperties> = {
   subtitle: {
     fontSize: 13,
     color: "#898781",
+    margin: "0 0 8px",
+  },
+  aboutTrigger: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    fontSize: 12,
+    color: "#898781",
+    background: "transparent",
+    border: "none",
+    padding: 0,
     margin: "0 0 16px",
+    cursor: "pointer",
+    textDecoration: "underline",
+    textDecorationColor: "#e1e0d9",
   },
 };
 
@@ -41,6 +56,7 @@ export default function App() {
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ScoreCardErrorInfo | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const requestRef = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
 
   const handlePointSelected = useCallback(
@@ -111,6 +127,9 @@ export default function App() {
       <aside className="app-sidebar" style={styles.sidebar}>
         <h1 style={styles.title}>Omaha Restaurant Site Score</h1>
         <p style={styles.subtitle}>Douglas &amp; Sarpy counties, NE. Click the map to score a point.</p>
+        <button type="button" style={styles.aboutTrigger} onClick={() => setAboutOpen(true)}>
+          Proof-of-concept — not for business decisions. About →
+        </button>
         <SubtypeSelector value={subtype} onChange={setSubtype} />
         <ScoreCard
           result={result}
@@ -119,6 +138,7 @@ export default function App() {
           onRetry={() => selectedPoint && handlePointSelected(selectedPoint)}
         />
       </aside>
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }

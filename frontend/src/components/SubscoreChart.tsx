@@ -16,7 +16,7 @@ import type { ScoreSubscores } from "../api/scoreClient";
 
 // Typed against ScoreSubscores so a mismatch (a renamed or added sub-score)
 // is a compile error here, not a silently-missing row.
-const SUBSCORE_LABELS: Record<keyof ScoreSubscores, string> = {
+export const SUBSCORE_LABELS: Record<keyof ScoreSubscores, string> = {
   demandDensity: "Demand density",
   competitiveSaturation: "Competitive saturation",
   complementaryDraw: "Complementary draw",
@@ -28,7 +28,7 @@ const SUBSCORE_LABELS: Record<keyof ScoreSubscores, string> = {
 // per-request data (contrast with `notes`, which is backend-computed and
 // only ever populated for growthTrend today; see routes/score.ts's
 // growthTrendNote).
-const SUBSCORE_DESCRIPTIONS: Record<keyof ScoreSubscores, string> = {
+export const SUBSCORE_DESCRIPTIONS: Record<keyof ScoreSubscores, string> = {
   demandDensity:
     "Estimates how many people live within the site's trade area, weighting the tighter primary ring (e.g. the 5- or 10-minute isochrone) more heavily than the wider secondary ring, using Census block-group population data intersected with the isochrone shape. That weighted population is then compared against a citywide sample of points across Douglas and Sarpy counties, and the score is the percentile it falls at: 75 means this site's trade-area population is higher than about 75% of sampled locations, not an absolute headcount.",
   competitiveSaturation:
@@ -41,7 +41,7 @@ const SUBSCORE_DESCRIPTIONS: Record<keyof ScoreSubscores, string> = {
     "Compares the trade area's population across two Census 5-year estimate periods (the most recent available vs. roughly five years prior) to estimate whether the area is gaining or losing population, then ranks that growth rate against a citywide sample of points. This is an approximate multi-year trend, not a true year-over-year rate, since Census block groups don't get 1-year estimates.",
 };
 
-const SUBSCORE_ORDER: (keyof ScoreSubscores)[] = [
+export const SUBSCORE_ORDER: (keyof ScoreSubscores)[] = [
   "demandDensity",
   "competitiveSaturation",
   "complementaryDraw",

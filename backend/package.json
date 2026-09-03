@@ -5,9 +5,10 @@
   "type": "module",
   "description": "Express API for the Omaha (Douglas+Sarpy) restaurant site-score portfolio project.",
   "scripts": {
-    "dev": "node --watch src/index.js",
-    "start": "node src/index.js",
-    "test": "node --test"
+    "dev": "node --watch src/index.ts",
+    "start": "node src/index.ts",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "cors": "^2.8.6",
@@ -15,5 +16,11 @@
     "express": "^5.2.1",
     "pg": "^8.23.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
 }

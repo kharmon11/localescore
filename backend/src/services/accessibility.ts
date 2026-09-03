@@ -1,4 +1,4 @@
-import { query } from "../db.js";
+import { query } from "../db.ts";
 
 // Road classification scores (docs/design.md 2.3: "arterial/collector roads
 // score higher than residential streets"). Values are Overture Transportation
@@ -6,14 +6,19 @@ import { query } from "../db.js";
 // tags (confirmed against a live Douglas+Sarpy download on 2026-08-19, which
 // turned up 17 distinct values). 16 are mapped explicitly below; the 17th,
 // "unknown" (1,742 segments as of a 2026-08-25 check), isn't listed here and
-// falls through to DEFAULT_ROAD_CLASS_SCORE instead -- which happens to also
+// falls through to DEFAULT_ROAD_CLASS_SCORE instead, which happens to also
 // be 50, the same as `unclassified`, so this is a deliberate simplification,
 // not a bug. Arterial-equivalent (primary/trunk/motorway) scores highest,
 // collector-equivalent (secondary/tertiary) in the middle, residential/
-// service/pedestrian-only ways lowest. Tune freely -- this mapping is a
+// service/pedestrian-only ways lowest. Tune freely: this mapping is a
 // starting point, not a settled answer (same spirit as spatialQueries.js's
 // COMPLEMENTARY_CATEGORY_WEIGHTS).
-const ROAD_CLASS_SCORES = {
+//
+// Typed as Record<string, number> rather than a literal-keyed object: the
+// real `road_class` value read below comes from OSM/Overture data (like
+// isochroneTypes.ts's `mode`), so it's open-ended external content this app
+// doesn't validate, not a closed set this file defines.
+const ROAD_CLASS_SCORES: Record<string, number> = {
   primary: 100,
   trunk: 95,
   motorway: 90,
@@ -39,8 +44,8 @@ const NEAREST_ROAD_SEARCH_RADIUS_METERS = 300;
 // one for transit specifically, so this reuses the "short walk" definition
 // already established elsewhere). Categories match the taxonomy note in
 // spatialQueries.js: Overture Places has no bus-stop-level transit data for
-// this region, only train_station/bus_station, so this signal will be near-
-// zero for most points -- a real, documented data limitation, not a bug.
+// this region, only train_station/bus_station, so this signal will be near
+// zero for most points, a real, documented data limitation, not a bug.
 const TRANSIT_RADIUS_METERS = 400;
 const TRANSIT_CATEGORIES = ["train_station", "bus_station"];
 
@@ -51,18 +56,15 @@ const TRANSIT_CATEGORIES = ["train_station", "bus_station"];
 const ROAD_CLASS_WEIGHT = 0.75;
 const TRANSIT_WEIGHT = 0.25;
 
-/**
- * Accessibility & Visibility sub-score (docs/design.md 2.3): a composite of
- * road classification at the point and nearby transit stop count. Corner-lot
- * detection and parking availability are both explicitly out of scope per
- * the design doc ("skip if too fiddly" / "treat as a manual override field
- * rather than an API call for the MVP").
- *
- * @param {number} lat
- * @param {number} lng
- * @returns {Promise<number>} 0-100
- */
-async function computeRoadClassScore(lat, lng) {
+interface RoadClassRow {
+  road_class: string | null;
+}
+
+interface TransitCountRow {
+  n: string; // Postgres COUNT(*) comes back as a string, cast with Number() below
+}
+
+async function computeRoadClassScore(lat: number, lng: number): Promise<number> {
   // KNN nearest-neighbor via the `<->` operator + GIST index on geom
   // (idx_road_segments_geom); ST_DWithin bounds it to a "some road actually
   // nearby" radius so an isolated click (e.g. deep in a park) falls back to
@@ -78,12 +80,12 @@ async function computeRoadClassScore(lat, lng) {
     ORDER BY geom <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)
     LIMIT 1;
   `;
-  const { rows } = await query(sql, [lng, lat, NEAREST_ROAD_SEARCH_RADIUS_METERS]);
+  const { rows } = await query<RoadClassRow>(sql, [lng, lat, NEAREST_ROAD_SEARCH_RADIUS_METERS]);
   if (rows.length === 0) return DEFAULT_ROAD_CLASS_SCORE;
-  return ROAD_CLASS_SCORES[rows[0].road_class] ?? DEFAULT_ROAD_CLASS_SCORE;
+  return ROAD_CLASS_SCORES[rows[0].road_class ?? ""] ?? DEFAULT_ROAD_CLASS_SCORE;
 }
 
-async function computeTransitScore(lat, lng) {
+async function computeTransitScore(lat: number, lng: number): Promise<number> {
   const sql = `
     SELECT COUNT(*) AS n
     FROM places
@@ -94,12 +96,21 @@ async function computeTransitScore(lat, lng) {
     )
     AND category_primary = ANY($4::text[]);
   `;
-  const { rows } = await query(sql, [lng, lat, TRANSIT_RADIUS_METERS, TRANSIT_CATEGORIES]);
+  const { rows } = await query<TransitCountRow>(sql, [lng, lat, TRANSIT_RADIUS_METERS, TRANSIT_CATEGORIES]);
   const count = Number(rows[0].n);
   return Math.min(100, count * 50); // 1 stop within reach -> 50, 2+ -> 100
 }
 
-export async function computeAccessibility(lat, lng) {
+/**
+ * Accessibility & Visibility sub-score (docs/design.md 2.3): a composite of
+ * road classification at the point and nearby transit stop count. Corner-lot
+ * detection and parking availability are both explicitly out of scope per
+ * the design doc ("skip if too fiddly" / "treat as a manual override field
+ * rather than an API call for the MVP").
+ *
+ * Returns a 0-100 score.
+ */
+export async function computeAccessibility(lat: number, lng: number): Promise<number> {
   const [roadClassScore, transitScore] = await Promise.all([
     computeRoadClassScore(lat, lng),
     computeTransitScore(lat, lng),

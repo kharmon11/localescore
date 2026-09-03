@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { Server } from "node:http";
 
-// app.js mounts scoreRouter, which pulls in db.js -- same stubbing as
-// score.test.js/db.test.js, needed before the dynamic import below.
+// app.ts mounts scoreRouter, which pulls in db.ts; same stubbing as
+// score.test.ts/db.test.ts, needed before the dynamic import below.
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.ORS_API_KEY ??= "test-key";
 process.env.CORS_ORIGINS = "http://allowed.example";
-const { app } = await import("./app.js");
+const { app } = await import("./app.ts");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // The real public/ dir only exists after the Docker build copies the built
@@ -37,16 +38,18 @@ after(() => {
   }
 });
 
-function startServer() {
+function startServer(): Promise<Server> {
   return new Promise((resolve) => {
     const server = app.listen(0, "127.0.0.1", () => resolve(server));
   });
 }
 
-async function withApp(fn) {
+async function withApp(fn: (port: number) => Promise<void>): Promise<void> {
   const server = await startServer();
   try {
-    await fn(server.address().port);
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    await fn(port);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

@@ -1,22 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-// db.js throws at import time if DATABASE_URL isn't set. Tests never make a
+// db.ts throws at import time if DATABASE_URL isn't set. Tests never make a
 // real connection (pool.query is always mocked below), so a dummy value is
-// fine. It just needs to be set before db.js is evaluated, hence the
+// fine. It just needs to be set before db.ts is evaluated, hence the
 // dynamic import after this assignment (a static `import` at the top of the
 // file would be hoisted ahead of this line).
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
-const { pool, query } = await import("./db.js");
+const { pool, query } = await import("./db.ts");
 
 test("query() delegates to pool.query with the same args and returns its result", async () => {
   const originalQuery = pool.query;
-  const calls = [];
+  const calls: { text: string; params?: any[] }[] = [];
   const fakeResult = { rows: [{ n: 1 }] };
-  pool.query = (text, params) => {
+  // pg's Pool.query has a large overloaded generic signature; a plain mock
+  // function isn't assignable to it without a cast, same as any test mock
+  // that replaces a strictly-typed library method with a simplified stand-in.
+  pool.query = ((text: string, params?: any[]) => {
     calls.push({ text, params });
     return Promise.resolve(fakeResult);
-  };
+  }) as typeof pool.query;
 
   try {
     const result = await query("SELECT 1 AS n WHERE $1 = $1", [42]);
@@ -31,8 +34,8 @@ test("query() delegates to pool.query with the same args and returns its result"
 
 test("pool.on('error', ...) logs an idle client error instead of throwing", () => {
   const originalConsoleError = console.error;
-  const loggedArgs = [];
-  console.error = (...args) => {
+  const loggedArgs: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
     loggedArgs.push(args);
   };
 

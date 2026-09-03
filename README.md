@@ -99,7 +99,7 @@ npm run dev
   `scoring_profiles` table (`db/seed/001_scoring_profiles.sql` seeds the
   defaults), keyed by restaurant subtype and scoring profile version. Edit a
   row, or insert a new version, to change how the score is calculated. `POST /score` also accepts an optional `weights` field to try hypothetical weights for a single query without persisting anything.
-- **Scoring math**: `backend/src/scoring/engine.js` calculates the final score.
+- **Scoring math**: `backend/src/scoring/engine.ts` calculates the final score.
 
 ## Caveats and Limitations
 

@@ -1,31 +1,59 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { IsochroneProfile, IsochroneFeatureCollection } from "../isochroneTypes.ts";
 
-// See db.test.js for why DATABASE_URL is stubbed before a dynamic import.
-// getIsochrone caches through db.js's pool, but never actually connects
+// See db.test.ts for why DATABASE_URL is stubbed before a dynamic import.
+// getIsochrone caches through db.ts's pool, but never actually connects
 // (pool.query is mocked in every test below). ORS_API_KEY is stubbed too,
 // since fetchFromOpenRouteService checks for it before ever calling fetch().
 process.env.DATABASE_URL ??= "postgres://test:test@localhost:5432/test";
 process.env.ORS_API_KEY ??= "test-key";
-const { pool } = await import("../db.js");
+const { pool } = await import("../db.ts");
 const { getIsochrone, buildCacheKey, OrsQuotaExceededError, OrsTransientError } =
-  await import("./isochrone.js");
+  await import("./isochrone.ts");
 
-const ISOCHRONE_PROFILE = { mode: "foot-walking", rangesMinutes: [5, 10] };
-const FIXTURE_GEOJSON = { type: "FeatureCollection", features: [] };
+const ISOCHRONE_PROFILE: IsochroneProfile = {
+  mode: "foot-walking",
+  rangesMinutes: [5, 10],
+  primaryRingWeight: 0.7,
+  secondaryRingWeight: 0.3,
+};
+const FIXTURE_GEOJSON: IsochroneFeatureCollection = { type: "FeatureCollection", features: [] };
 
-function withMocks({ queryImpl, fetchImpl }, fn) {
+// Mocks stand in for pg's Pool.query and the global fetch, both of which
+// have large real signatures a plain mock function isn't assignable to
+// without a cast, same as the mock in db.test.ts.
+type QueryImpl = (text: string, params?: any[]) => Promise<{ rows: any[] }>;
+type FetchImpl = (url: string, options?: RequestInit) => Promise<MockOrsResponse>;
+
+function withMocks(
+  { queryImpl, fetchImpl }: { queryImpl: QueryImpl; fetchImpl: FetchImpl },
+  fn: () => Promise<void>
+): Promise<void> {
   const originalQuery = pool.query;
   const originalFetch = globalThis.fetch;
-  pool.query = queryImpl;
-  globalThis.fetch = fetchImpl;
+  pool.query = queryImpl as typeof pool.query;
+  globalThis.fetch = fetchImpl as typeof fetch;
   return fn().finally(() => {
     pool.query = originalQuery;
     globalThis.fetch = originalFetch;
   });
 }
 
-function orsResponse(status, body, headers = {}) {
+// A deliberately minimal stand-in for the real fetch Response: only the
+// members this codebase actually reads (ok, status, headers, text, json).
+// It isn't assignable to the real Response type (which requires many more
+// members these fixtures don't implement), which is exactly why FetchImpl's
+// return type is this interface rather than Response.
+interface MockOrsResponse {
+  ok: boolean;
+  status: number;
+  headers: Headers;
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+}
+
+function orsResponse(status: number, body: string, headers: Record<string, string> = {}): MockOrsResponse {
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -86,7 +114,7 @@ test("getIsochrone returns the cached GeoJSON on a cache hit without calling fet
 });
 
 test("getIsochrone fetches and caches on a cache miss", async () => {
-  const queryCalls = [];
+  const queryCalls: { text: string; params?: any[] }[] = [];
   let fetchCalls = 0;
   await withMocks(
     {
@@ -125,9 +153,9 @@ test("getIsochrone throws OrsQuotaExceededError with resetAt from x-ratelimit-re
     async () => {
       await assert.rejects(
         () => getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE),
-        (err) => {
+        (err: unknown) => {
           assert.ok(err instanceof OrsQuotaExceededError);
-          assert.equal(err.resetAt.getTime(), resetEpochSeconds * 1000);
+          assert.equal(err.resetAt?.getTime(), resetEpochSeconds * 1000);
           return true;
         }
       );
@@ -145,7 +173,7 @@ test("getIsochrone's OrsQuotaExceededError has a null resetAt when x-ratelimit-r
     async () => {
       await assert.rejects(
         () => getIsochrone(41.2565, -95.9345, ISOCHRONE_PROFILE),
-        (err) => {
+        (err: unknown) => {
           assert.ok(err instanceof OrsQuotaExceededError);
           assert.equal(err.resetAt, null);
           return true;
@@ -236,12 +264,12 @@ test("getIsochrone classifies an aborted/timed-out request as transient", async 
 
 test("getIsochrone passes a real AbortSignal to fetch() when a caller signal is given", async () => {
   const controller = new AbortController();
-  let receivedSignal;
+  let receivedSignal: AbortSignal | null | undefined;
   await withMocks(
     {
       queryImpl: async () => ({ rows: [] }),
       fetchImpl: async (url, options) => {
-        receivedSignal = options.signal;
+        receivedSignal = options?.signal;
         return orsResponse(200, JSON.stringify(FIXTURE_GEOJSON));
       },
     },

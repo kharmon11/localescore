@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeScore, scoreBand } from "./engine.js";
+import { computeScore, scoreBand } from "./engine.ts";
 
 const baseProfile = {
   subtype: "coffee_shop",

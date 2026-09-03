@@ -99,6 +99,17 @@ test("silently clears loading and shows no error when fetchScore rejects with an
   expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
 });
 
+test("the About trigger opens the modal, and the close button dismisses it", () => {
+  render(<App />);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByText(/Proof-of-concept.*About/));
+  expect(screen.getByRole("dialog", { name: "About LocaleScore" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Close"));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
 test("aborts the in-flight request's controller when a new point is selected before it resolves", async () => {
   const abortSpy = vi.spyOn(AbortController.prototype, "abort");
   let resolveFirst!: (value: ScoreResponse) => void;

@@ -10,7 +10,7 @@ import type { ScoreResponse, Band, ScoreErrorType } from "../api/scoreClient";
 //
 // Typed as Record<Band, ...> so a missing or mistyped band is a compile
 // error here, the same reasoning as SubscoreChart's SUBSCORE_LABELS.
-const BAND_STYLES: Record<Band, { color: string; label: string }> = {
+export const BAND_STYLES: Record<Band, { color: string; label: string }> = {
   strong: { color: "#0ca30c", label: "Strong site" },
   good: { color: "#fab219", label: "Good site" },
   marginal: { color: "#ec835a", label: "Marginal site" },

@@ -4,7 +4,7 @@
 # Postgres database -- the data behind the Accessibility & Visibility
 # sub-score's road-classification component (docs/design.md 2.3; see
 # README.md's former "Known gaps" note, now resolved by this +
-# backend/src/services/accessibility.js).
+# backend/src/services/accessibility.ts).
 set -euo pipefail
 
 if [ -z "${DATABASE_URL:-}" ]; then

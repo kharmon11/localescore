@@ -6,7 +6,7 @@
 //
 // Approach: sample a grid of points across Douglas+Sarpy, compute each raw
 // metric at every point using the REAL spatial-query logic the backend uses
-// at request time (backend/src/services/spatialQueries.js, imported
+// at request time (backend/src/services/spatialQueries.ts, imported
 // directly below -- not reimplemented here, so this can't silently drift
 // out of sync with what /score actually computes), and derive
 // percentiles/medians from that sample, per subtype.
@@ -40,7 +40,7 @@
 // QUOTA NOTE (2026-08-19): docs/design.md's original "2,500 requests/day"
 // claim was for the old api.openrouteservice.org tier. That domain is being
 // shut off entirely on 2026-08-24 in favor of api.heigit.org (see the
-// migration note in backend/src/services/isochrone.js), whose free tier is
+// migration note in backend/src/services/isochrone.ts), whose free tier is
 // smaller and shaped differently -- confirmed against a real account
 // dashboard (https://account.heigit.org/info/plans) on 2026-08-19: Isochrones
 // V2 is 500 requests/day, with a separate 20-requests/minute rate limit.
@@ -66,10 +66,10 @@
 // just re-run this script after anything might have changed.
 
 import "dotenv/config";
-import { pool, query } from "../backend/src/db.js";
-import { getIsochrone, buildCacheKey } from "../backend/src/services/isochrone.js";
-import { computeRawMetrics } from "../backend/src/services/spatialQueries.js";
-import { SUBTYPE_COMPETITOR_CATEGORY_PATTERNS } from "../backend/src/routes/score.js";
+import { pool, query } from "../backend/src/db.ts";
+import { getIsochrone, buildCacheKey } from "../backend/src/services/isochrone.ts";
+import { computeRawMetrics } from "../backend/src/services/spatialQueries.ts";
+import { SUBTYPE_COMPETITOR_CATEGORY_PATTERNS } from "../backend/src/routes/score.ts";
 
 const GRID_SPACING_DEGREES = 0.02; // ~1.7km E-W / ~2.2km N-S at this latitude; adjust for denser/coarser sampling
 // Matches the corrected Douglas+Sarpy bbox in ingest-overture.sh / scripts/README.md
@@ -363,7 +363,7 @@ function median(values) {
 }
 
 function assertEnv() {
-  // backend/src/db.js (imported above, transitively) already throws
+  // backend/src/db.ts (imported above, transitively) already throws
   // immediately if DATABASE_URL is missing -- this ORS_API_KEY check exists
   // separately because nothing checks for that until deep into the sample
   // loop otherwise (the first cache miss), which would mean failing minutes

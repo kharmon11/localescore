@@ -74,7 +74,7 @@ a new ACS vintage is released (annually). Always re-run
 derived from whatever's currently in the database.
 
 `ingest-roads.sh` populates `road_segments`, used by
-`backend/src/services/accessibility.js` for the Accessibility & Visibility
+`backend/src/services/accessibility.ts` for the Accessibility & Visibility
 sub-score's road-classification component (docs/design.md 2.3) -- it's not
 read by `compute-benchmarks.js` (that sub-score isn't percentile-normalized
 against a citywide sample; it's an absolute 0-100 heuristic, same as before).
@@ -93,7 +93,7 @@ As of the 2026-08-19 rewrite, this script samples a grid of ~925 points
 across Douglas+Sarpy for *each* active subtype using real isochrones
 (previously a flat-radius circle approximation -- see the script's header
 comment for the full history). ~925 points x 3 subtypes is ~2,775 isochrone
-requests. The real free-tier quota (see `backend/src/services/isochrone.js`'s
+requests. The real free-tier quota (see `backend/src/services/isochrone.ts`'s
 migration note and the QUOTA NOTE in this script's header -- confirmed
 against a real account dashboard on 2026-08-19) is 500 requests/day with a
 separate 20-requests/minute rate limit, not the 2,500/day this doc used to

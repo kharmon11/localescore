@@ -55,7 +55,7 @@ const styles: Record<string, CSSProperties> = {
     padding: 0,
     fontSize: 15,
     lineHeight: 1,
-    color: "#8af",
+    color: "#46a",
     background: "transparent",
     border: "none",
     cursor: "pointer",
